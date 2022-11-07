@@ -81,7 +81,7 @@ def count_angle(raw, sel=[[0,3,6]]):
     return np.array(angle).T
 
 def combine_feat(dlc_raw, sel_dist=[[0,1],[0,2],[1,3],[2,3],[3,4],[3,5],[4,6],[5,6]], sel_ang=[[0,3,6]], 
-                sel_coord=[0,1,2,3,4,5,8,9,10,11,12,13], normalize=(1,5)):
+                sel_coord=[0,1,2,3,4,5,8,9,10,11,12,13], normalize=(1,5), index=True):
     '''
     return concatenation of distance and angle
     '''
@@ -106,7 +106,8 @@ def combine_feat(dlc_raw, sel_dist=[[0,1],[0,2],[1,3],[2,3],[3,4],[3,5],[4,6],[5
     # if dim_red:
     #     pca = PCA(n_components=dim_red)
     #     feat = pca.fit_transform(feat)
-    feat = np.hstack([frame_index, feat])
+    if index:
+        feat = np.hstack([frame_index, feat])
     return feat
 
 def generate_tmpfeat(feat):
