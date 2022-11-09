@@ -3,6 +3,213 @@ import cv2
 import argparse
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
+import os
+from scipy.fft import fft, fftfreq
+
+class miceData:
+    def __init__(self, dlc=None, vidc=None, vids=None, dep=None):
+        if(dlc):
+            self.dlcfile = dlc
+            self.read_dlc()
+        if(vidc):
+            self.vidcfile = vidc
+        if(vids):
+            self.vidsfile = vids
+        if(dep):
+            self.depfile = dep
+    
+    ### DLC functions #############################################################################
+    def read_dlc(self):
+        if not os.path.isfile(self.dlcfile):
+            print("no file")
+            return
+        raw = np.genfromtxt(self.dlcfile, delimiter=",",dtype=int)[3:]
+        getcol = tuple(np.arange(len(raw[0]))[np.arange(len(raw[0]))%3!=0])
+        self.dlc_index = np.expand_dims(raw[:,0], axis=1)
+        self.dlc_raw = raw[:,getcol]
+        #remove nan
+        notnan = ~np.isnan(self.dlc_raw).any(axis=1)
+        self.dlc_raw = self.dlc_raw[notnan]
+        self.dlc_index = self.dlc_index[notnan]
+    def dlc_wrap(self):
+        return np.resize(self.dlc_raw,(len(self.dlc_raw),int(self.dlc_raw.shape[1]/2),2))
+    ###############################################################################################
+    
+    ### config feature ##########################################################################
+    def feature_config(self, sel_dist=[[0,1]], sel_ang=[[0,1,2]], 
+                sel_coord=[], landmark_normalize=(0,1), include_index=False):
+        self.sel_dist=sel_dist
+        self.sel_ang=sel_ang
+        self.sel_coord=sel_coord
+        self.landmark_normalize=landmark_normalize
+        self.include_index = include_index
+
+        self.seg_window = 10
+
+    ### landmark feature ##########################################################################
+    def count_dist(self, sel=None):
+        '''
+        Distances for landmarks in each frame
+        '''
+        if not sel:
+            sel = self.sel_dist
+        distances = []
+        for [i,j] in sel:
+            p1 = self.dlc_raw[:,2*i:2*i+2]
+            p2 = self.dlc_raw[:,2*j:2*j+2]
+            distances.append(np.linalg.norm(p2-p1,axis=1))
+        return np.array(distances).T
+
+    def count_angle(self, sel=None):
+        '''
+        count angles for 5 points dlc (raw) in each frame
+        sel: angle of selected points (example:[[0,1,2],[1,2,3]] => angle of points)
+        '''
+        if not sel:
+            sel = self.sel_ang
+        angle = []
+        for p1,p2,p3 in sel:
+            v1 = raw[:,2*p1:2*p1+2]-raw[:,2*p2:2*p2+2]
+            v2 = raw[:,2*p3:2*p3+2]-raw[:,2*p2:2*p2+2]
+            angle.append(abs(np.arctan2(v1[:,0],v1[:,1])-np.arctan2(v2[:,0],v2[:,1])))
+        return np.array(angle).T
+    
+    def count_disp(self, step=1, threshold=None):
+        '''
+        count distances and vectors(directions) between frames of deeplabcut data
+        threshold: distance set 0 for value under threshold
+        dlc_raw shape: N*(2*landmarks) 
+        distances shape: (N-1)*landmarks
+        vectors shape: (N-1)*landmarks*2
+        directions shape: (N-1)*landmarks
+        '''
+        data = self.dlc_raw
+
+        distances = []
+        # for each two frames
+        for i in range(0,len(data)-step,step):
+            distance = []
+            #vector = []
+            #direction = []
+            # for each landmark
+            for j in range(int(len(data[0])/2)):
+                p1=data[i,2*j:2*j+2]
+                p2=data[i+step,2*j:2*j+2]
+                vec = p2-p1
+                #direction.append(np.arctan2(vec[1],vec[0]))
+                #vector.append(vec)
+                dis = np.linalg.norm(vec)
+                if threshold and dis<threshold:
+                    distance.append(0)
+                else:
+                    distance.append(dis)
+            #vectors.append(vector)
+            distances.append(distance)
+            #directions.append(direction)
+        return np.array(distances)
+
+    def count_landmark_feat(self):
+        try:
+            self.sel_dist
+        except NameError:
+            print('config undone')
+            return
+        raw = self.dlc_raw
+
+        feat = np.zeros([len(raw), 0])
+        if self.sel_dist:
+            a = count_dist(raw, self.sel_dist)
+            feat = np.hstack([feat,a])
+        if self.sel_ang:
+            a = count_angle(raw, self.sel_ang)
+            feat = np.hstack([feat,a])
+        if self.sel_coord:
+            a = raw[:,self.sel_coord]
+            feat = np.hstack([feat,a])
+        
+        if self.landmark_normalize:
+            scaler = MinMaxScaler(feature_range=self.landmark_normalize)
+            scaler.fit(feat)
+            feat = scaler.transform(feat)
+        if self.include_index:
+            feat = np.hstack([self.frame_index, feat])
+
+        self.landmark_feat = feat
+    ###############################################################################################
+
+    ### video feature #############################################################################
+    def count_optflow_feat(self, mask=True, stop=None, white_back=False):
+        '''
+        count optical flow Fx,Fy for all points in video
+        mask: remove noise flow by mice roi mask (frame==0)
+        '''
+        vid_path = self.vidsfile
+        cap = cv2.VideoCapture(vid_path)
+        flows = []
+        ret, frame = cap.read()
+        prvs = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        prvs = cv2.equalizeHist(prvs)
+        if white_back:
+            prvs[np.where(prvs==0)]=255
+        i=0
+        while(1):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if stop and i>=stop:
+                break
+            next = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # next = cv2.equalizeHist(next)
+            if white_back:
+                next[np.where(next==0)]=255
+            flow = cv2.calcOpticalFlowFarneback(prvs, next, None, 0.5, 3, 5, 3, 5, 5, 0)
+            if mask:
+                flow[np.where(next==0)]=0
+            flows.append(flow)
+            i+=1
+        return np.array(flows)
+
+    def mice_area(self):
+        '''
+        detect mice area in each frame to observe stretch and clinge
+        '''
+        vid_path = self.vidsfile
+        cap = cv2.VideoCapture(vid_path)
+        areas = []
+        while(cap.isOpened()):
+            ret,frame = cap.read()
+            if not ret:
+                break
+            areas.append(len(np.where(frame==0)[0]))
+        return np.array(areas)
+    #################################################################################################
+    
+    ### segment feature #############################################################################
+    def seg_statistic(self, feat, count_types=['avg'], window=None, step=None):
+        if not window:
+            window = self.seg_window
+        msk_feat = []
+        for i in range(int(len(feat)/window)):
+            msk = feat[i*window:i*window+window]
+            newfeat = []
+            if 'max' in count_types:
+                msk_feat.append(np.max(msk, axis=0))
+            if 'min' in count_types:
+                msk_feat.append(np.min(msk, axis=0))
+            if 'avg' in count_types:
+                msk_feat.append(np.mean(msk, axis=0))
+            if 'std' in count_types:
+                msk_feat.append(np.std(msk, axis=0))
+            if 'fft' in count_types:
+                freq = fft(feat.T)
+                freq_feat = []
+                for feat_freq in freq:
+                    msk_feat.extend(feat_freq)
+
+            newfeat = np.concatenate(newfeat)
+            msk_feat.append(newfeat)
+        return np.array(msk_feat)
+
 
 class dlc:
     def __init__(self, dlc_path=None, raw=True, landmarknum=7):
