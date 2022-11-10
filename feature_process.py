@@ -193,18 +193,18 @@ class miceData:
             msk = feat[i*window:i*window+window]
             newfeat = []
             if 'max' in count_types:
-                msk_feat.append(np.max(msk, axis=0))
+                newfeat.append(np.max(msk, axis=0))
             if 'min' in count_types:
-                msk_feat.append(np.min(msk, axis=0))
+                newfeat.append(np.min(msk, axis=0))
             if 'avg' in count_types:
-                msk_feat.append(np.mean(msk, axis=0))
+                newfeat.append(np.mean(msk, axis=0))
             if 'std' in count_types:
-                msk_feat.append(np.std(msk, axis=0))
+                newfeat.append(np.std(msk, axis=0))
             if 'fft' in count_types:
                 freq = fft(feat.T)
                 freq_feat = []
                 for feat_freq in freq:
-                    msk_feat.extend(feat_freq)
+                    newfeat.extend(feat_freq)
 
             newfeat = np.concatenate(newfeat)
             msk_feat.append(newfeat)
