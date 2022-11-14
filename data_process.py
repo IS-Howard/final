@@ -125,17 +125,16 @@ class miceFeature:
     ### train test config ##########################################################################
     def labeling(self):
         # pain:1 sng:2 health:0
-        labels = np.zeros_like(feat[:,0], dtype=int)
+        labels = np.zeros_like(self.feature[:,0], dtype=int)
         if self.treatment == 'pH5.2':
             labels[:] = 2
         elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
             labels[:] = 0
         elif self.treatment == 'Cap':
             labels[:] = 1
-        
         self.label=labels
          
-    def train_config(self, split=0.5, shuffle=True):
+    def train_config(self, split=0.1, shuffle=True):
         # shuffle
         ind = np.arange(len(self.feature))
         np.random.shuffle(ind)
@@ -152,9 +151,9 @@ class miceFeature:
             self.x_test = []
             self.y_test = []
         else:
-            sp = len(label)//10
+            sp = int(len(label)*split)
             self.x_train = feat[:sp,:]
-            self.y_train = label
-            self.x_test = []
-            self.y_test = []
+            self.y_train = label[:sp]
+            self.x_test = feat[sp:,:]
+            self.y_test = label[sp:]
                 
