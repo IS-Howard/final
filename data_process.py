@@ -4,12 +4,66 @@ class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
-    def __init__(self):
-        print(0)
+    def __init__(self, dlc=None, vidc=None, vids=None, dep=None, specific=[]):
+        self.specific = specific
+        self.files = {}
+        self.files['dlc'] = self.load_paths(dlc, True)
+        self.files['vids'] = self.load_paths(vids)
+        self.files['vidc'] = self.load_paths(vidc)
+        self.files['dep'] = self.load_paths(dep)
+        self.data_config()
 
-class miceData:
+    def load_paths(self, root, sav_treat=False):
+        if not root:
+            return []
+        files = os.listdir(root)
+        sav_files = []
+        treatments = []
+        names = []
+        for file in files:
+            sav = True
+            for sp in self.specific:
+                if file.find(sp)==-1:
+                    sav = False
+                    break
+            if not sav:
+                continue
+            if sav_treat:
+                treatment = file.split('-')[0]
+                name = file.split('-')[1]
+                if file.find('basal')!=-1:
+                    treatments.append(treatment+'basal')
+                else:
+                    treatments.append(treatment)
+                names.append(name)
+            sav_files.append(root+'/'+file)
+        if sav_treat:
+            self.names = names
+            self.treatments = treatments
+        return sav_files
+
+    def data_config(self):
+        self.ind={}
+        self.ind['basal'] = [i for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
+        self.ind['Capbasal'] = [i for i, j in enumerate(self.treatments) if j == 'Capbasal']
+        self.ind['pH5.2basal'] = [i for i, j in enumerate(self.treatments) if j == 'pH5.2basal']
+        self.ind['pH7.4basal'] = [i for i, j in enumerate(self.treatments) if j == 'pH7.4basal']
+        self.ind['Cap'] = [i for i, j in enumerate(self.treatments) if j == 'Cap']
+        self.ind['pH5.2'] = [i for i, j in enumerate(self.treatments) if j == 'pH5.2']
+        self.ind['pH7.4'] = [i for i, j in enumerate(self.treatments) if j == 'pH7.4']
+        print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']))
+
+    def sel_file(self, filetype='dlc', treatment='Cap'):
+        if treatment == 'basal':
+            return [self.files[filetype][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
+        return [self.files[filetype][i] for i, j in enumerate(self.treatments) if j==treatment]
+
+
+
+
+class miceFeature:
     '''
-    Storing All data(file paths, landmarks, features ...) of single mice
+    Storing All data(file paths, landmarks, features ...) of single mice(file)
     '''
     def __init__(self, dlc=None, vidc=None, vids=None, dep=None):
         if(dlc):
