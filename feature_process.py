@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-import argparse
+# import argparse
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
 import os
@@ -62,6 +62,12 @@ def count_disp(raw, step=1, threshold=None):
         distances.append(distance)
         #directions.append(direction)
     return np.array(distances)
+
+def feature_normalize(feat, normalize_range=(0,1)):
+    scaler = MinMaxScaler(feature_range=normalize_range)
+    scaler.fit(feat)
+    feat = scaler.transform(feat)
+    return feat
 ###############################################################################################
 
 ### feature from video #############################################################################
@@ -129,6 +135,8 @@ def seg_statistic(feat, count_types=['avg'], window=10, step=1):
             newfeat.append(np.mean(msk, axis=0))
         if 'std' in count_types:
             newfeat.append(np.std(msk, axis=0))
+        if 'sum' in count_types:
+            newfeat.append(np.sum(msk, axis=0))
         # if 'fft' in count_types:
         #     freq = fft(feat.T)
         #     freq_feat = []
@@ -170,11 +178,13 @@ def cwt_signal(feat, window=10, step=1):
 
     return powers
 
-def fft_signal(feat, window=10,step=1):
+def fft_signal(feat, window=10,step=1, flat=True):
     msk_feat = []
     for i in range(int(len(feat)/window)):
         msk = feat[i*window:i*window+window]
-        freq = fft(feat.T)
+        freq = fft(msk.T)
+        if flat:
+            freq=freq.flatten()
         msk_feat.append(freq)
     return np.array(msk_feat)
 ##################################################################################################

@@ -65,7 +65,8 @@ class miceFeature:
     '''
     Storing All data(file paths, landmarks, features ...) of single mice(file)
     '''
-    def __init__(self, dlc=None, vidc=None, vids=None, dep=None):
+    def __init__(self, treatment, dlc=None, vidc=None, vids=None, dep=None):
+        self.treatment = treatment
         if(dlc):
             self.dlcfile = dlc
             self.read_dlc()
@@ -93,12 +94,67 @@ class miceFeature:
         return np.resize(self.dlc_raw,(len(self.dlc_raw),int(self.dlc_raw.shape[1]/2),2))
     ###############################################################################################
     
-    ### config feature ##########################################################################
-    def feature_config(self):
-        self.sel_dist=[[0,1]]
-        self.sel_ang=[[0,1,2]]
-        self.sel_coord=[]
-        self.landmark_normalize=(0,1)
-        self.include_index =False
+    ### generate feature ##########################################################################
+    def count_feature(self):
+        # config
+        sel_dist=[[0,3],[3,6]]
+        sel_ang=[[1,3,2]]
+        sel_coord=[]
+        normalize_range=(0,1)
+        include_index = False
+        seg_window = 10
 
-        self.seg_window = 10
+        # frame feature pre
+        dist = count_dist(self.dlc_raw, sel_dist)[1:]
+        ang = count_angle(self.dlc_raw, sel_ang)[1:]
+        disp = count_disp(self.dlc_raw, step=1, threshold=None)
+        # frame feature
+        feat = dist
+        feat = np.hstack([feat, ang])
+        feat = np.hstack([feat, disp[:,0:1]])
+        # segment feature
+        seg = abs(fft_signal(feat, window=seg_window, flat=True))
+        tmp = np.hstack([disp, ang])
+        seg = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=1)])
+        seg = np.hstack([seg, seg_statistic(dist, count_types=['sum'], window=10, step=1)])
+        # normalize
+        seg = feature_normalize(seg, normalize_range=normalize_range)
+
+        self.feature = seg
+
+    ### train test config ##########################################################################
+    def labeling(self):
+        # pain:1 sng:2 health:0
+        labels = np.zeros_like(feat[:,0], dtype=int)
+        if self.treatment == 'pH5.2':
+            labels[:] = 2
+        elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
+            labels[:] = 0
+        elif self.treatment == 'Cap':
+            labels[:] = 1
+        
+        self.label=labels
+         
+    def train_config(self, split=0.5, shuffle=True):
+        # shuffle
+        ind = np.arange(len(self.feature))
+        np.random.shuffle(ind)
+        self.shuffle = ind
+        # split
+        feat = self.feature
+        label = self.label
+        if shuffle:
+            feat = self.feature[ind]
+            label = self.label[ind]
+        if split==0:
+            self.x_train = feat
+            self.y_train = label
+            self.x_test = []
+            self.y_test = []
+        else:
+            sp = len(label)//10
+            self.x_train = feat[:sp,:]
+            self.y_train = label
+            self.x_test = []
+            self.y_test = []
+                
