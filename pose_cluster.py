@@ -1,7 +1,7 @@
-from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import joblib
+import matplotlib.pyplot as plt
 
 from sklearn.decomposition import PCA
 import umap
@@ -13,58 +13,55 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.svm import SVC
 
+# from data_process import *
+
 class myEmbeder:
     def __init__(self, sel):
         self.sel = sel
     def transform(self, x):
         return x[:,self.sel]
 
-def bsoidfeat(filename, landmarknum, framerate, savename=None, shift=False):
-    #read csv
-    pose_chosen = np.arange(landmarknum*3)
-    csv_raw = pd.read_csv(filename, low_memory=False)
-    csv_data, _ = adp_filt(csv_raw, pose_chosen)
-    #extract feature from points
-    feats = bsoid_extract([csv_data], framerate, shift)
-    if savename:
-        joblib.dump(np.concatenate(feats), savename)
-    return np.concatenate(feats)
-
 def embedfeat(feat, num_dimensions=None, sel=[], savename=None):
+    '''
+    Dimension reduction
+        num_dimensions: to certain dimension by UMAP
+        sel: select certain features
+    '''
     if len(sel)>0: # select feature manually
         embeddings = feat[:,sel]
-        learned_embeddings = myEmbeder(sel)
+        embeder = myEmbeder(sel)
     else: # select feature by UMAP
         if not num_dimensions:
             pca = PCA()
             pca.fit(feat)
             num_dimensions = np.argwhere(np.cumsum(pca.explained_variance_ratio_) >= 0.7)[0][0] + 1
         sampled_input_feats = feat[np.random.choice(feat.shape[0], feat.shape[0], replace=False)]
-        learned_embeddings = umap.UMAP(n_neighbors=60, n_components=num_dimensions, min_dist=0.0, random_state=42).fit(sampled_input_feats)
-        embeddings = learned_embeddings.embedding_
+        embeder = umap.UMAP(n_neighbors=60, n_components=num_dimensions, min_dist=0.0, random_state=42).fit(sampled_input_feats)
+        embeddings = embeder.embedding_
     if savename:
-        joblib.dump(learned_embeddings, savename)
-    return learned_embeddings, embeddings
+        joblib.dump(embeder, savename)
+    return embeder, embeddings
 
-def motion_cluster(embeddings, min_c=None, k=None, cls_type='hdbscan'):
+def motion_cluster(feat, k=None, cls_type='hdbscan'):
     if cls_type=='hdbscan':
-        print("min cluster size: ", int(round(min_c * 0.01 * embeddings.shape[0])))
+        min_c = k
+        print("min cluster size: ", int(round(min_c * 0.01 * feat.shape[0])))
         learned_hierarchy = hdbscan.HDBSCAN(
                             prediction_data=True, min_cluster_size=int(round(min_c * 0.01 * embeddings.shape[0])),
-                            min_samples=1).fit(embeddings)
+                            min_samples=1).fit(feat)
         labels = learned_hierarchy.labels_
         assign_prob = hdbscan.all_points_membership_vectors(learned_hierarchy)
         assignments = np.argmax(assign_prob, axis=1)
-        print("motions num: ", len(np.unique(assignments)))
     elif cls_type=='spec':
         clustering = SpectralClustering(n_clusters=k, assign_labels='discretize', random_state=0).fit(embeddings)
         assignments = clustering.labels_
     elif cls_type=='km':
-        clustering = KMeans(n_clusters=k).fit(embeddings)
+        clustering = KMeans(n_clusters=k).fit(feat)
         assignments = clustering.labels_
+    print("motions num: ", len(np.unique(assignments)))
     return assignments
 
-def motion_clf(x, y, test_part=0.1, score=False, savename=None, clf_type='svm'):
+def motion_clf(x, y, test_part=0.1, score=True, savename=None, clf_type='svm'):
     if test_part:
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.1, random_state=42)
     else:
@@ -91,164 +88,75 @@ def motion_predict(feat, clf, embeder=None):
     labels = clf.predict(test_embedding)
     return labels
 
-
-#################### BSOID migrate functions #######################################################################
-import itertools
-import math
-import numpy as np
-from sklearn.preprocessing import StandardScaler
-
-
-def boxcar_center(a, n):
-    a1 = pd.Series(a)
-    moving_avg = np.array(a1.rolling(window=n, min_periods=1, center=True).mean())
-
-    return moving_avg
-
-def bsoid_extract(data, fps, frameshift=False):
-    """
-    Extracts features based on (x,y) positions
-    :param data: list, csv data
-    :param fps: scalar, input for camera frame-rate
-    :return f_10fps: 2D array, extracted features
-    """
-    win_len = np.int(np.round(0.05 / (1 / fps)) * 2 - 1)
-    feats = []
-    for m in range(len(data)):
-        dataRange = len(data[m])
-        dxy_r = []
-        dis_r = []
-        for r in range(dataRange):
-            if r < dataRange - 1:
-                dis = []
-                for c in range(0, data[m].shape[1], 2):
-                    dis.append(np.linalg.norm(data[m][r + 1, c:c + 2] - data[m][r, c:c + 2]))
-                dis_r.append(dis)
-            dxy = []
-            for i, j in itertools.combinations(range(0, data[m].shape[1], 2), 2):
-                dxy.append(data[m][r, i:i + 2] - data[m][r, j:j + 2])
-            dxy_r.append(dxy)
-        dis_r = np.array(dis_r)
-        dxy_r = np.array(dxy_r)
-        dis_smth = []
-        dxy_eu = np.zeros([dataRange, dxy_r.shape[1]])
-        ang = np.zeros([dataRange - 1, dxy_r.shape[1]])
-        dxy_smth = []
-        ang_smth = []
-        for l in range(dis_r.shape[1]):
-            dis_smth.append(boxcar_center(dis_r[:, l], win_len))
-        for k in range(dxy_r.shape[1]):
-            for kk in range(dataRange):
-                dxy_eu[kk, k] = np.linalg.norm(dxy_r[kk, k, :])
-                if kk < dataRange - 1:
-                    b_3d = np.hstack([dxy_r[kk + 1, k, :], 0])
-                    a_3d = np.hstack([dxy_r[kk, k, :], 0])
-                    c = np.cross(b_3d, a_3d)
-                    ang[kk, k] = np.dot(np.dot(np.sign(c[2]), 180) / np.pi,
-                                        math.atan2(np.linalg.norm(c),
-                                                   np.dot(dxy_r[kk, k, :], dxy_r[kk + 1, k, :])))
-            dxy_smth.append(boxcar_center(dxy_eu[:, k], win_len))
-            ang_smth.append(boxcar_center(ang[:, k], win_len))
-        dis_smth = np.array(dis_smth)
-        dxy_smth = np.array(dxy_smth)
-        ang_smth = np.array(ang_smth)
-        feats.append(np.vstack((dxy_smth[:, 1:], ang_smth, dis_smth)))
-
-    f_10fps = []
-    for n in range(0, len(feats)):
-        feats1 = np.zeros(len(data[n]))
-        for s in range(math.floor(fps / 10)):
-            for k in range(round(fps / 10) + s, len(feats[n][0]), round(fps / 10)):
-                if k > round(fps / 10) + s:
-                    feats1 = np.concatenate((feats1.reshape(feats1.shape[0], feats1.shape[1]),
-                                                np.hstack((np.mean((feats[n][0:dxy_smth.shape[0],
-                                                                    range(k - round(fps / 10), k)]), axis=1),
-                                                        np.sum((feats[n][dxy_smth.shape[0]:feats[n].shape[0],
-                                                                range(k - round(fps / 10), k)]),
-                                                                axis=1))).reshape(len(feats[0]), 1)), axis=1)
-                else:
-                    feats1 = np.hstack((np.mean((feats[n][0:dxy_smth.shape[0], range(k - round(fps / 10), k)]),
-                                                axis=1),
-                                        np.sum((feats[n][dxy_smth.shape[0]:feats[n].shape[0],
-                                                range(k - round(fps / 10), k)]), axis=1))).reshape(len(feats[0]), 1)
-            scaler = StandardScaler()
-            scaler.fit(feats1.T)
-            scaled_feats1 = scaler.transform(feats1.T)
-            f_10fps.append(scaled_feats1)
-            if not frameshift:
-                break # no frame shift
-    return f_10fps
-
-
-def bsoid_predict(filename, landmarknum, framerate, clf, embeder=None):
-    '''
-    bsoid prediction (with frame shift)
-    input : DLC csv file, landmarknum, framerate, clf
-    output : frame labels
-    '''
-    pose_chosen = np.arange(landmarknum*3)
-    csv_raw = pd.read_csv(filename, low_memory=False)
-    csv_data, _ = adp_filt(csv_raw, pose_chosen)
-    feats = bsoid_extract([csv_data], framerate, True)
-    # frame shift labels
-    labels = []
-    for i in range(0, len(feats)):
-        feat = feats[i]
-        if embeder:
-            feat = embeder.transform(feat)
-        labels.append(clf.predict(feat))
-    # labels from frame shift labels
-    labels_pad = -1 * np.ones([len(labels), len(max(labels, key=lambda x: len(x)))])
-    for n, l in enumerate(labels):
-        labels_pad[n][0:len(l)] = l
-        labels_pad[n] = labels_pad[n][::-1]
-        if n > 0:
-            labels_pad[n][0:n] = labels_pad[n - 1][0:n]
-    labels_fs = labels_pad.astype(int)
-    # flatten labels
-    labels_fs2 = []
-    for l in range(math.floor(framerate / 10)):
-        labels_fs2.append(labels_fs[l])
-    labels_fs2 = np.array(labels_fs2).flatten('F')
-    return labels_fs2
-
-
-def adp_filt(currdf: object, pose):
-    lIndex = []
-    xIndex = []
-    yIndex = []
-    currdf = np.array(currdf[1:])
-    for header in pose:
-        if currdf[0][header + 1] == "likelihood":
-            lIndex.append(header)
-        elif currdf[0][header + 1] == "x":
-            xIndex.append(header)
-        elif currdf[0][header + 1] == "y":
-            yIndex.append(header)
-    curr_df1 = currdf[:, 1:]
-    datax = curr_df1[1:, np.array(xIndex)]
-    datay = curr_df1[1:, np.array(yIndex)]
-    data_lh = curr_df1[1:, np.array(lIndex)]
-    currdf_filt = np.zeros((datax.shape[0], (datax.shape[1]) * 2))
-    perc_rect = []
-    for i in range(data_lh.shape[1]):
-        perc_rect.append(0)
-    for x in tqdm(range(data_lh.shape[1])):
-        a, b = np.histogram(data_lh[1:, x].astype(np.float))
-        rise_a = np.where(np.diff(a) >= 0)
-        if rise_a[0][0] > 1:
-            llh = b[rise_a[0][0]]
-        else:
-            llh = b[rise_a[0][1]]
-        data_lh_float = data_lh[:, x].astype(np.float)
-        perc_rect[x] = np.sum(data_lh_float < llh) / data_lh.shape[0]
-        currdf_filt[0, (2 * x):(2 * x + 2)] = np.hstack([datax[0, x], datay[0, x]])
-        for i in range(1, data_lh.shape[0]):
-            if data_lh_float[i] < llh:
-                currdf_filt[i, (2 * x):(2 * x + 2)] = currdf_filt[i - 1, (2 * x):(2 * x + 2)]
-            else:
-                currdf_filt[i, (2 * x):(2 * x + 2)] = np.hstack([datax[i, x], datay[i, x]])
-    currdf_filt = np.array(currdf_filt)
-    currdf_filt = currdf_filt.astype(np.float)
-    return currdf_filt, perc_rect
-#########################################################################################################################
+### pose analysis on data ##########################################################################
+def cluster_micedata(miceD, sel=['random'], sel_num=20, 
+                    embed=False, k=10, cls_type='km', clf_type='svm'):
+    # miceD : DataSet class object
+    # miceF : miceFeature class object
+    # get feature
+    feat = []
+    if sel[0]=='random':
+        miceFs = miceD.mice_feat
+        ind = np.random.choice(np.arange(len(miceFs)), sel_num, replace=False)
+        for i in ind:
+            feat.append(miceFs[i].feature)
+    else:
+        miceFs = []
+        for s in sel:
+            miceFs.entend(miceD.sel_feat(s))
+        for miceF in miceFs:
+            feat.append(miceF.feature)
+    feat = np.concatenate(feat)
+    # cluster
+    if embed:
+        embeder, feat = embedfeat(feat)
+    motions = motion_cluster(feat, k, cls_type)
+    motion_num = len(np.unique(motions))
+    mclf = motion_clf(feat, motions, clf_type=clf_type)
+    # cluster predict and save result
+    motionsB = [0]*motion_num
+    motionsT = [0]*motion_num
+    miceFsB, miceFsT = miceD.sel_feat('Capbasal'), miceD.sel_feat('Cap')
+    for i in range(len(miceFsB)):
+        miceFB = miceFsB[i]
+        miceFT = miceFsT[i]
+        if embed:
+            motionB = motion_predict(miceFB.feature, mclf, embeder)
+            motionT = motion_predict(miceFT.feature, mclf, embeder)
+        else:    
+            motionB = motion_predict(miceFB.feature, mclf)
+            motionT = motion_predict(miceFT.feature, mclf)
+        for i in np.unique(motions):
+            motionsB[i]+= len(np.where(motionB==i)[0])
+            motionsT[i]+= len(np.where(motionT==i)[0])
+    # plot 
+    x = np.arange(motion_num)
+    width = 0.3
+    plt.bar(x, motionsB, width, color='green', label='basal')
+    plt.bar(x + width, motionsT, width, color='red', label='treat')
+    plt.xticks(x + width / 2, x)
+    plt.legend(bbox_to_anchor=(1,1), loc='upper left')
+    plt.show()
+    return motionsB,motionsT
+    # cluster basal/treat statistic
+    # diff = np.array(motionsT)-np.array(motionsB)
+    # sum2 = np.array(motionsT)+np.array(motionsB)
+    # ratio = np.zeros((motion_num), dtype=float)
+    # for i in range(motion_num):
+    #     ratio[i] = motionsT[i]/(motionsB[i]+motionsT[i])
+    # count motion score
+    # motion_score = np.zeros((motion_num), dtype=float)
+    # if score_type=='clf':
+    #     th = 0.4
+    #     if show:
+    #         print(abs(diff)/sum(abs(diff)))
+    #         print(np.array(sum2)/sum(sum2))
+    #     motion_score[(ratio<=th) | (ratio>=1-th)] = 1
+    #     motion_score[(ratio>th) & (ratio<1-th)] = -1
+    #     # motion_score[np.where(abs(diff)/sum(abs(diff))>0.04)] = 1
+    #     # motion_score[np.where(abs(diff)/sum(abs(diff))<=0.04)] = -1
+    # elif score_type=='reg1':
+    #     motion_score = ratio
+    # else: # score by pose
+    #     motion_score = np.ones((motion_num), dtype=float)
+    # return motion_score ,motion_num

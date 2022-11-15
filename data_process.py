@@ -61,6 +61,11 @@ class DataSet:
             return [self.files[filetype][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
         return [self.files[filetype][i] for i, j in enumerate(self.treatments) if j==treatment]
 
+    def sel_feat(self, treatment='all'):
+        if treatment == 'basal':
+            return[self.mice_feat[i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
+        return [self.mice_feat[i] for i, j in enumerate(self.treatments) if j==treatment]
+    
     def generate_feature(self):
         self.mice_feat = []
         for i in range(len(self.files['dlc'])):
