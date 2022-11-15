@@ -4,8 +4,9 @@ class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
-    def __init__(self, dlc=None, vidc=None, vids=None, dep=None, specific=[]):
+    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[]):
         self.specific = specific
+        self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
         self.files = {}
         self.files['dlc'] = self.load_paths(dlc, True)
         self.files['vids'] = self.load_paths(vids)
@@ -44,19 +45,52 @@ class DataSet:
 
     def data_config(self):
         self.ind={}
-        self.ind['basal'] = [i for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
-        self.ind['Capbasal'] = [i for i, j in enumerate(self.treatments) if j == 'Capbasal']
-        self.ind['pH5.2basal'] = [i for i, j in enumerate(self.treatments) if j == 'pH5.2basal']
-        self.ind['pH7.4basal'] = [i for i, j in enumerate(self.treatments) if j == 'pH7.4basal']
-        self.ind['Cap'] = [i for i, j in enumerate(self.treatments) if j == 'Cap']
-        self.ind['pH5.2'] = [i for i, j in enumerate(self.treatments) if j == 'pH5.2']
-        self.ind['pH7.4'] = [i for i, j in enumerate(self.treatments) if j == 'pH7.4']
+        self.ind['basal'] = np.array([i for i, j in enumerate(self.treatments) if j.find('basal')!=-1])
+        for t in self.all_treatment:
+            self.ind[t] = np.array([i for i, j in enumerate(self.treatments) if j == t])
+        # self.ind['Capbasal'] = np.array([i for i, j in enumerate(self.treatments) if j == 'Capbasal'])
+        # self.ind['pH5.2basal'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH5.2basal'])
+        # self.ind['pH7.4basal'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH7.4basal'])
+        # self.ind['Cap'] = np.array([i for i, j in enumerate(self.treatments) if j == 'Cap'])
+        # self.ind['pH5.2'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH5.2'])
+        # self.ind['pH7.4'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH7.4'])
         print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']))
 
     def sel_file(self, filetype='dlc', treatment='Cap'):
         if treatment == 'basal':
             return [self.files[filetype][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
         return [self.files[filetype][i] for i, j in enumerate(self.treatments) if j==treatment]
+
+    def generate_feature(self):
+        self.mice_feat = []
+        for i in range(len(self.files['dlc'])):
+            tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
+            self.mice_feat.append(tmp)
+
+    def generate_train_test(self):
+        x_train = []
+        y_train = []
+        x_test = [] 
+        y_test = []
+        x_val = []
+        y_val = []
+        for t in self.all_treatment:
+            inds = self.ind[t]
+            for i in range(len(inds)-1): #last one for validate
+                ind = inds[i]
+                x_train.append(self.mice_feat[ind].x_train)
+                y_train.append(self.mice_feat[ind].y_train)
+                x_test.append(self.mice_feat[ind].x_test)
+                y_test.append(self.mice_feat[ind].y_test)
+            ind = inds[len(inds)-1]
+            x_val.append(self.mice_feat[ind].feature)
+            y_val.append(self.mice_feat[ind].label)
+        self.x_train = np.concatenate(x_train)
+        self.y_train = np.concatenate(y_train)
+        self.x_test = np.concatenate(x_test)
+        self.y_test = np.concatenate(y_test)
+        self.x_val = np.concatenate(x_val)
+        self.y_val = np.concatenate(y_val)
 
 
 
@@ -76,6 +110,10 @@ class miceFeature:
             self.vidsfile = vids
         if(dep):
             self.depfile = dep
+
+        self.count_feature()
+        self.labeling()
+        self.train_config(split=0.5, shuffle=True)
     
     ### DLC functions #############################################################################
     def read_dlc(self):
@@ -134,7 +172,7 @@ class miceFeature:
             labels[:] = 1
         self.label=labels
          
-    def train_config(self, split=0.1, shuffle=True):
+    def train_config(self, split=0.5, shuffle=True):
         # shuffle
         ind = np.arange(len(self.feature))
         np.random.shuffle(ind)
@@ -151,6 +189,7 @@ class miceFeature:
             self.x_test = []
             self.y_test = []
         else:
+            # split : training portion
             sp = int(len(label)*split)
             self.x_train = feat[:sp,:]
             self.y_train = label[:sp]
