@@ -1,10 +1,11 @@
 from feature_process import *
+from pose_cluster import *
 
 class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
-    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[]):
+    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[], motion_del=False):
         self.specific = specific
         self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
         self.files = {}
@@ -13,6 +14,8 @@ class DataSet:
         self.files['vidc'] = self.load_paths(vidc)
         self.files['dep'] = self.load_paths(dep)
         self.data_config()
+        self.mclf=None
+        self.motion_del=motion_del
 
     def load_paths(self, root, sav_treat=False):
         if not root:
@@ -73,6 +76,15 @@ class DataSet:
             self.mice_feat.append(tmp)
 
     def generate_train_test(self):
+        # config for mice_feat
+        for miceF in self.mice_feat:
+            if self.mclf:
+                miceF.labeling(self.mclf,self.motion_score)
+            else:
+                miceF.labeling()
+            miceF.train_config(motion_del=self.motion_del)
+
+        # start
         x_train = []
         y_train = []
         x_test = [] 
@@ -97,6 +109,70 @@ class DataSet:
         self.x_val = np.concatenate(x_val)
         self.y_val = np.concatenate(y_val)
 
+    def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
+        # miceF : miceFeature class object
+        # get feature
+        feat = []
+        if sel[0]=='random':
+            miceFs = self.mice_feat
+            ind = np.random.choice(np.arange(len(miceFs)), sel_num, replace=False)
+            for i in ind:
+                feat.append(miceFs[i].feature)
+        else:
+            miceFs = []
+            for s in sel:
+                miceFs.extend(self.sel_feat(s))
+            for miceF in miceFs:
+                feat.append(miceF.feature)
+        feat = np.concatenate(feat)
+        # cluster
+        if embed:
+            embeder, embeddings = embedfeat(feat)
+            motions, mclf = motion_cluster(embeddings, k, cls_type)
+            self.embeder = embeder
+        else:
+            motions, mclf = motion_cluster(feat, k, cls_type)
+        motion_num = len(np.unique(motions))
+        if not mclf:
+            mclf = motion_clf(feat, motions, clf_type=clf_type)
+        # cluster predict and save result
+        motionsB = [0]*motion_num
+        motionsT = [0]*motion_num
+        miceFsB, miceFsT = self.sel_feat('Capbasal'), self.sel_feat('Cap')
+        for i in range(len(miceFsB)):
+            miceFB = miceFsB[i]
+            miceFT = miceFsT[i]
+            if embed:
+                motionB = motion_predict(miceFB.feature, mclf, embeder)
+                motionT = motion_predict(miceFT.feature, mclf, embeder)
+            else:    
+                motionB = motion_predict(miceFB.feature, mclf)
+                motionT = motion_predict(miceFT.feature, mclf)
+            for i in np.unique(motions):
+                motionsB[i]+= len(np.where(motionB==i)[0])
+                motionsT[i]+= len(np.where(motionT==i)[0])
+        # motion score
+        motion_num = len(motionsB)
+        ratio = np.zeros((motion_num), dtype=float)
+        for i in range(motion_num):
+            if (motionsB[i]+motionsT[i])>0:
+                ratio[i] = motionsT[i]/(motionsB[i]+motionsT[i])
+        motion_score = np.zeros((motion_num), dtype=float)
+        th = 0.4
+        motion_score[(ratio<=th) | (ratio>=1-th)] = 1
+        motion_score[(ratio>th) & (ratio<1-th)] = -1
+        # plot 
+        x = np.arange(motion_num)
+        width = 0.3
+        plt.bar(x, motionsB, width, color='green', label='basal')
+        plt.bar(x + width, motionsT, width, color='red', label='treat')
+        plt.xticks(x + width / 2, x)
+        plt.legend(bbox_to_anchor=(1,1), loc='upper left')
+        plt.show()
+        self.mclf = mclf
+        self.motionsB = motionsB
+        self.motionsT = motionsT
+        self.motion_score = motion_score
 
 
 
@@ -117,8 +193,8 @@ class miceFeature:
             self.depfile = dep
 
         self.count_feature()
-        self.labeling()
-        self.train_config(split=0.5, shuffle=True)
+        # self.labeling()
+        # self.train_config(split=0.5, shuffle=True, del_bad=True)
     
     ### DLC functions #############################################################################
     def read_dlc(self):
@@ -166,7 +242,7 @@ class miceFeature:
         self.feature = seg
 
     ### train test config ##########################################################################
-    def labeling(self):
+    def labeling(self, mclf=None, motion_score=None):
         # pain:1 sng:2 health:0
         labels = np.zeros_like(self.feature[:,0], dtype=int)
         if self.treatment == 'pH5.2':
@@ -175,16 +251,26 @@ class miceFeature:
             labels[:] = 0
         elif self.treatment == 'Cap':
             labels[:] = 1
+        if mclf:
+            motions = motion_predict(self.feature, mclf)
+            for i in range(len(motion_score)):
+                if motion_score[i] == -1:
+                    labels[np.where(motions==i)] = -1
         self.label=labels
          
-    def train_config(self, split=0.5, shuffle=True):
+    def train_config(self, split=0.5, shuffle=True, motion_del=False):
         # shuffle
         ind = np.arange(len(self.feature))
         np.random.shuffle(ind)
         self.shuffle = ind
+        # select sample
+        if motion_del:
+            feat = self.feature[np.where(self.label!=-1),:]
+            label = self.label[np.where(self.label!=-1)]
+        else:
+            feat = self.feature
+            label = self.label
         # split
-        feat = self.feature
-        label = self.label
         if shuffle:
             feat = self.feature[ind]
             label = self.label[ind]
