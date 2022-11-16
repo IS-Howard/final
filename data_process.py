@@ -1,5 +1,6 @@
 from feature_process import *
 from pose_cluster import *
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 class DataSet:
     '''
@@ -51,12 +52,6 @@ class DataSet:
         self.ind['basal'] = np.array([i for i, j in enumerate(self.treatments) if j.find('basal')!=-1])
         for t in self.all_treatment:
             self.ind[t] = np.array([i for i, j in enumerate(self.treatments) if j == t])
-        # self.ind['Capbasal'] = np.array([i for i, j in enumerate(self.treatments) if j == 'Capbasal'])
-        # self.ind['pH5.2basal'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH5.2basal'])
-        # self.ind['pH7.4basal'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH7.4basal'])
-        # self.ind['Cap'] = np.array([i for i, j in enumerate(self.treatments) if j == 'Cap'])
-        # self.ind['pH5.2'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH5.2'])
-        # self.ind['pH7.4'] = np.array([i for i, j in enumerate(self.treatments) if j == 'pH7.4'])
         print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']))
 
     def sel_file(self, filetype='dlc', treatment='Cap'):
@@ -66,8 +61,13 @@ class DataSet:
 
     def sel_feat(self, treatment='all'):
         if treatment == 'basal':
-            return[self.mice_feat[i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
+            return [self.mice_feat[i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
         return [self.mice_feat[i] for i, j in enumerate(self.treatments) if j==treatment]
+    
+    def sel_data(self, treatment='all', sel_type='x_train'):
+        if treatment == 'basal':
+            return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
+        return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j==treatment]
     
     def generate_feature(self):
         self.mice_feat = []
@@ -85,29 +85,21 @@ class DataSet:
             miceF.train_config(motion_del=self.motion_del)
 
         # start
-        x_train = []
-        y_train = []
-        x_test = [] 
-        y_test = []
-        x_val = []
-        y_val = []
+        all_sets = ['x_train','y_train','x_test','y_test','x_val','y_val']
+        self.data = {}
+        for s in all_sets:
+            self.data[s] = []
         for t in self.all_treatment:
             inds = self.ind[t]
             for i in range(len(inds)-1): #last one for validate
                 ind = inds[i]
-                x_train.append(self.mice_feat[ind].x_train)
-                y_train.append(self.mice_feat[ind].y_train)
-                x_test.append(self.mice_feat[ind].x_test)
-                y_test.append(self.mice_feat[ind].y_test)
+                self.data['x_train'].append(self.mice_feat[ind].x_train)
+                self.data['y_train'].append(self.mice_feat[ind].y_train)
+                self.data['x_test'].append(self.mice_feat[ind].x_test)
+                self.data['y_test'].append(self.mice_feat[ind].y_test)
             ind = inds[len(inds)-1]
-            x_val.append(self.mice_feat[ind].feature)
-            y_val.append(self.mice_feat[ind].label)
-        self.x_train = np.concatenate(x_train)
-        self.y_train = np.concatenate(y_train)
-        self.x_test = np.concatenate(x_test)
-        self.y_test = np.concatenate(y_test)
-        self.x_val = np.concatenate(x_val)
-        self.y_val = np.concatenate(y_val)
+            self.data['x_val'].append(self.mice_feat[ind].feature)
+            self.data['y_val'].append(self.mice_feat[ind].label)
 
     def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
         # miceF : miceFeature class object
@@ -287,3 +279,23 @@ class miceFeature:
             self.x_test = feat[sp:,:]
             self.y_test = label[sp:]
                 
+class Analysis:
+    def __init__(self):
+        self.model = SVC(kernel='rbf', C=1000)
+
+    def train(self, x, y):
+        self.model = self.model.fit(x,y)
+
+    def test(self, x, y, show=False):
+        sc = self.model.score(x, y)
+        if show:
+            print('accuracy = ',sc)
+        return sc
+
+    def plot_cm(self, x, y, score=False):
+        pred = self.model.predict(x)
+        if score:
+            print('accuracy = ',self.model.score(x, y))
+        cm = confusion_matrix(y, pred, labels=self.model.classes_)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
+        disp.plot()
