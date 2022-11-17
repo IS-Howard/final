@@ -1,12 +1,12 @@
 from feature_process import *
 from pose_cluster import *
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
 
 class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
-    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[], motion_del=False):
+    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[]):
         self.specific = specific
         self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
         self.files = {}
@@ -16,7 +16,6 @@ class DataSet:
         self.files['dep'] = self.load_paths(dep)
         self.data_config()
         self.mclf=None
-        self.motion_del=motion_del
 
     def load_paths(self, root, sav_treat=False):
         if not root:
@@ -75,14 +74,17 @@ class DataSet:
             tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
             self.mice_feat.append(tmp)
 
-    def generate_train_test(self):
+    def generate_train_test(self, split=0.5, motion_del=False):
+        '''
+        validation setting as last of each three treatment mice
+        '''
         # config for mice_feat
         for miceF in self.mice_feat:
             if self.mclf:
                 miceF.labeling(self.mclf,self.motion_score)
             else:
                 miceF.labeling()
-            miceF.train_config(motion_del=self.motion_del)
+            miceF.train_config(split=split, motion_del=motion_del)
 
         # start
         all_sets = ['x_train','y_train','x_test','y_test','x_val','y_val']
@@ -100,6 +102,38 @@ class DataSet:
             ind = inds[len(inds)-1]
             self.data['x_val'].append(self.mice_feat[ind].feature)
             self.data['y_val'].append(self.mice_feat[ind].label)
+
+    def generate_train_test2(self, split=0.5, motion_del=False):
+        '''
+        validation setting as pH7.4
+        '''
+        # config for mice_feat
+        for miceF in self.mice_feat:
+            if self.mclf:
+                miceF.labeling(self.mclf,self.motion_score)
+            else:
+                miceF.labeling()
+            miceF.train_config(split=split, motion_del=motion_del)
+
+        # start
+        all_sets = ['x_train','y_train','x_test','y_test','x_val','y_val']
+        self.data = {}
+        for s in all_sets:
+            self.data[s] = []
+        for t in ['Capbasal','Cap','pH5.2basal','pH5.2']:
+            inds = self.ind[t]
+            for i in range(len(inds)):
+                ind = inds[i]
+                self.data['x_train'].append(self.mice_feat[ind].x_train)
+                self.data['y_train'].append(self.mice_feat[ind].y_train)
+                self.data['x_test'].append(self.mice_feat[ind].x_test)
+                self.data['y_test'].append(self.mice_feat[ind].y_test)
+        for t in ['pH7.4basal','pH7.4']:
+            inds = self.ind[t]
+            for i in range(len(inds)):
+                ind = inds[i]
+                self.data['x_val'].append(self.mice_feat[ind].feature)
+                self.data['y_val'].append(self.mice_feat[ind].label)
 
     def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
         # miceF : miceFeature class object
@@ -153,6 +187,7 @@ class DataSet:
         th = 0.4
         motion_score[(ratio<=th) | (ratio>=1-th)] = 1
         motion_score[(ratio>th) & (ratio<1-th)] = -1
+        print("bad motions:", len(np.where(motion_score==-1)[0]))
         # plot 
         x = np.arange(motion_num)
         width = 0.3
@@ -185,8 +220,6 @@ class miceFeature:
             self.depfile = dep
 
         self.count_feature()
-        # self.labeling()
-        # self.train_config(split=0.5, shuffle=True, del_bad=True)
     
     ### DLC functions #############################################################################
     def read_dlc(self):
@@ -208,8 +241,8 @@ class miceFeature:
     ### generate feature ##########################################################################
     def count_feature(self):
         # config
-        sel_dist=[[0,3],[3,6]]
-        sel_ang=[[1,3,2]]
+        sel_dist=[[0,3],[3,6],[0,1],[0,2],[3,4],[3,5]]
+        sel_ang=[[1,3,2],[0,3,6],[4,3,5]]
         sel_coord=[]
         normalize_range=(0,1)
         include_index = False
@@ -220,18 +253,20 @@ class miceFeature:
         ang = count_angle(self.dlc_raw, sel_ang)[1:]
         disp = count_disp(self.dlc_raw, step=1, threshold=None)
         # frame feature
-        feat = dist
-        feat = np.hstack([feat, ang])
+        feat = dist[:,0:2]
+        feat = np.hstack([feat, ang[:,0:1]])
         feat = np.hstack([feat, disp[:,0:1]])
         # segment feature
-        seg = abs(fft_signal(feat, window=seg_window, flat=True))
-        tmp = np.hstack([disp, ang])
-        seg = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=1)])
-        seg = np.hstack([seg, seg_statistic(dist, count_types=['sum'], window=10, step=1)])
+        # seg = abs(fft_signal(feat, window=seg_window, flat=True))
+        seg = cwt_signal(feat, window=10, step=1)
+        # combine
+        tmp = np.hstack([dist, ang])
+        feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=1)])
+        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=10, step=1)])
         # normalize
-        seg = feature_normalize(seg, normalize_range=normalize_range)
+        feat = feature_normalize(feat, normalize_range=normalize_range)
 
-        self.feature = seg
+        self.feature = feat
 
     ### train test config ##########################################################################
     def labeling(self, mclf=None, motion_score=None):
@@ -251,21 +286,21 @@ class miceFeature:
         self.label=labels
          
     def train_config(self, split=0.5, shuffle=True, motion_del=False):
-        # shuffle
-        ind = np.arange(len(self.feature))
-        np.random.shuffle(ind)
-        self.shuffle = ind
         # select sample
         if motion_del:
-            feat = self.feature[np.where(self.label!=-1),:]
+            feat = self.feature[np.where(self.label!=-1)]
             label = self.label[np.where(self.label!=-1)]
         else:
             feat = self.feature
             label = self.label
+        # shuffle
+        ind = np.arange(len(feat))
+        np.random.shuffle(ind)
+        self.shuffle = ind
         # split
         if shuffle:
-            feat = self.feature[ind]
-            label = self.label[ind]
+            feat = feat[ind]
+            label = label[ind]
         if split==0:
             self.x_train = feat
             self.y_train = label
@@ -292,10 +327,10 @@ class Analysis:
             print('accuracy = ',sc)
         return sc
 
-    def plot_cm(self, x, y, score=False):
+    def plot_cm(self, x, y, score=True):
         pred = self.model.predict(x)
         if score:
-            print('accuracy = ',self.model.score(x, y))
+            print('accuracy = ', accuracy_score(y, pred))
         cm = confusion_matrix(y, pred, labels=self.model.classes_)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
         disp.plot()

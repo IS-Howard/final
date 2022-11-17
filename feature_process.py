@@ -3,6 +3,7 @@ import cv2
 # import argparse
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 import os
 from scipy.fft import fft, fftfreq
 from WT import transform,wavelets
@@ -63,10 +64,15 @@ def count_disp(raw, step=1, threshold=None):
         #directions.append(direction)
     return np.array(distances)
 
-def feature_normalize(feat, normalize_range=(0,1)):
-    scaler = MinMaxScaler(feature_range=normalize_range)
-    scaler.fit(feat)
-    feat = scaler.transform(feat)
+def feature_normalize(feat, normalize_range=(0,1), sc='minmax'):
+    if sc == 'minmax':
+        scaler = MinMaxScaler(feature_range=normalize_range)
+        scaler.fit(feat)
+        feat = scaler.transform(feat)
+    if sc == 'std':
+        scaler = StandardScaler()
+        scaler.fit(feat)
+        feat = scaler.transform(feat)
     return feat
 ###############################################################################################
 
@@ -171,12 +177,12 @@ def cwt_signal(feat, window=10, step=1):
         dt = 1              # sampling frequency
         dj = 0.2             # scale distribution parameter
         wavelet = wavelets.Morlet()
-        wa = transform.WaveletTransformTorch(dt, dj, wavelet, cuda=True)
+        wa = transform.WaveletTransformTorch(dt, dj, wavelet, cuda=False)
 
         #cwt = wa.cwt(x) # Eular format
         powers.append(wa.power(x).flatten())
 
-    return powers
+    return np.array(powers)
 
 def fft_signal(feat, window=10,step=1, flat=True):
     msk_feat = []
