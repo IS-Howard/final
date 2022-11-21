@@ -1,19 +1,19 @@
 from feature_process import *
-from pose_cluster import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+import joblib
+from sklearn.svm import SVC
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
-    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[]):
+    def __init__(self, dlc, bsoid=None, specific=[]):
         self.specific = specific
         self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
         self.files = {}
         self.files['dlc'] = self.load_paths(dlc, True)
-        self.files['vids'] = self.load_paths(vids)
-        self.files['vidc'] = self.load_paths(vidc)
-        self.files['dep'] = self.load_paths(dep)
+        self.files['bsoid'] = self.load_paths(bsoid)
         self.data_config()
         self.mclf=None
 
@@ -68,10 +68,13 @@ class DataSet:
             return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
         return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j==treatment]
     
-    def generate_feature(self):
+    def generate_feature(self, bsoid=True):
         self.mice_feat = []
         for i in range(len(self.files['dlc'])):
-            tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
+            if bsoid:
+                tmp = miceFeature(self.treatments[i], bsoid=self.files['bsoid'][i])
+            else:
+                tmp = miceFeature(self.treatments[i], self.files['dlc'][i])
             self.mice_feat.append(tmp)
 
     def generate_train_test(self, split=0.5, motion_del=False):
@@ -135,71 +138,71 @@ class DataSet:
                 self.data['x_val'].append(self.mice_feat[ind].feature)
                 self.data['y_val'].append(self.mice_feat[ind].label)
 
-    def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
-        # miceF : miceFeature class object
-        # get feature
-        feat = []
-        if sel[0]=='random':
-            miceFs = self.mice_feat
-            ind = np.random.choice(np.arange(len(miceFs)), sel_num, replace=False)
-            for i in ind:
-                feat.append(miceFs[i].feature)
-        else:
-            miceFs = []
-            for s in sel:
-                miceFs.extend(self.sel_feat(s))
-            for miceF in miceFs:
-                feat.append(miceF.feature)
-        feat = np.concatenate(feat)
-        # cluster
-        if embed:
-            embeder, embeddings = embedfeat(feat)
-            motions, mclf = motion_cluster(embeddings, k, cls_type)
-            self.embeder = embeder
-        else:
-            motions, mclf = motion_cluster(feat, k, cls_type)
-        motion_num = len(np.unique(motions))
-        if not mclf:
-            mclf = motion_clf(feat, motions, clf_type=clf_type)
-        # cluster predict and save result
-        motionsB = [0]*motion_num
-        motionsT = [0]*motion_num
-        miceFsB, miceFsT = self.sel_feat('Capbasal'), self.sel_feat('Cap')
-        for i in range(len(miceFsB)):
-            miceFB = miceFsB[i]
-            miceFT = miceFsT[i]
-            if embed:
-                motionB = motion_predict(miceFB.feature, mclf, embeder)
-                motionT = motion_predict(miceFT.feature, mclf, embeder)
-            else:    
-                motionB = motion_predict(miceFB.feature, mclf)
-                motionT = motion_predict(miceFT.feature, mclf)
-            for i in np.unique(motions):
-                motionsB[i]+= len(np.where(motionB==i)[0])
-                motionsT[i]+= len(np.where(motionT==i)[0])
-        # motion score
-        motion_num = len(motionsB)
-        ratio = np.zeros((motion_num), dtype=float)
-        for i in range(motion_num):
-            if (motionsB[i]+motionsT[i])>0:
-                ratio[i] = motionsT[i]/(motionsB[i]+motionsT[i])
-        motion_score = np.zeros((motion_num), dtype=float)
-        th = 0.4
-        motion_score[(ratio<=th) | (ratio>=1-th)] = 1
-        motion_score[(ratio>th) & (ratio<1-th)] = -1
-        print("bad motions:", len(np.where(motion_score==-1)[0]))
-        # plot 
-        x = np.arange(motion_num)
-        width = 0.3
-        plt.bar(x, motionsB, width, color='green', label='basal')
-        plt.bar(x + width, motionsT, width, color='red', label='treat')
-        plt.xticks(x + width / 2, x)
-        plt.legend(bbox_to_anchor=(1,1), loc='upper left')
-        plt.show()
-        self.mclf = mclf
-        self.motionsB = motionsB
-        self.motionsT = motionsT
-        self.motion_score = motion_score
+    # def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
+    #     # miceF : miceFeature class object
+    #     # get feature
+    #     feat = []
+    #     if sel[0]=='random':
+    #         miceFs = self.mice_feat
+    #         ind = np.random.choice(np.arange(len(miceFs)), sel_num, replace=False)
+    #         for i in ind:
+    #             feat.append(miceFs[i].feature)
+    #     else:
+    #         miceFs = []
+    #         for s in sel:
+    #             miceFs.extend(self.sel_feat(s))
+    #         for miceF in miceFs:
+    #             feat.append(miceF.feature)
+    #     feat = np.concatenate(feat)
+    #     # cluster
+    #     if embed:
+    #         embeder, embeddings = embedfeat(feat)
+    #         motions, mclf = motion_cluster(embeddings, k, cls_type)
+    #         self.embeder = embeder
+    #     else:
+    #         motions, mclf = motion_cluster(feat, k, cls_type)
+    #     motion_num = len(np.unique(motions))
+    #     if not mclf:
+    #         mclf = motion_clf(feat, motions, clf_type=clf_type)
+    #     # cluster predict and save result
+    #     motionsB = [0]*motion_num
+    #     motionsT = [0]*motion_num
+    #     miceFsB, miceFsT = self.sel_feat('Capbasal'), self.sel_feat('Cap')
+    #     for i in range(len(miceFsB)):
+    #         miceFB = miceFsB[i]
+    #         miceFT = miceFsT[i]
+    #         if embed:
+    #             motionB = motion_predict(miceFB.feature, mclf, embeder)
+    #             motionT = motion_predict(miceFT.feature, mclf, embeder)
+    #         else:    
+    #             motionB = motion_predict(miceFB.feature, mclf)
+    #             motionT = motion_predict(miceFT.feature, mclf)
+    #         for i in np.unique(motions):
+    #             motionsB[i]+= len(np.where(motionB==i)[0])
+    #             motionsT[i]+= len(np.where(motionT==i)[0])
+    #     # motion score
+    #     motion_num = len(motionsB)
+    #     ratio = np.zeros((motion_num), dtype=float)
+    #     for i in range(motion_num):
+    #         if (motionsB[i]+motionsT[i])>0:
+    #             ratio[i] = motionsT[i]/(motionsB[i]+motionsT[i])
+    #     motion_score = np.zeros((motion_num), dtype=float)
+    #     th = 0.4
+    #     motion_score[(ratio<=th) | (ratio>=1-th)] = 1
+    #     motion_score[(ratio>th) & (ratio<1-th)] = -1
+    #     print("bad motions:", len(np.where(motion_score==-1)[0]))
+    #     # plot 
+    #     x = np.arange(motion_num)
+    #     width = 0.3
+    #     plt.bar(x, motionsB, width, color='green', label='basal')
+    #     plt.bar(x + width, motionsT, width, color='red', label='treat')
+    #     plt.xticks(x + width / 2, x)
+    #     plt.legend(bbox_to_anchor=(1,1), loc='upper left')
+    #     plt.show()
+    #     self.mclf = mclf
+    #     self.motionsB = motionsB
+    #     self.motionsT = motionsT
+    #     self.motion_score = motion_score
 
 
 
@@ -207,19 +210,15 @@ class miceFeature:
     '''
     Storing All data(file paths, landmarks, features ...) of single mice(file)
     '''
-    def __init__(self, treatment, dlc=None, vidc=None, vids=None, dep=None):
+    def __init__(self, treatment, dlc=None, bsoid=None):
         self.treatment = treatment
         if(dlc):
             self.dlcfile = dlc
             self.read_dlc()
-        if(vidc):
-            self.vidcfile = vidc
-        if(vids):
-            self.vidsfile = vids
-        if(dep):
-            self.depfile = dep
-
-        self.count_feature()
+            self.count_feature()
+        if(bsoid):
+            self.bsoidfile = bsoid
+            self.load_feature()
     
     ### DLC functions #############################################################################
     def read_dlc(self):
@@ -241,32 +240,32 @@ class miceFeature:
     ### generate feature ##########################################################################
     def count_feature(self):
         # config
-        sel_dist=[[0,3],[3,6],[0,1],[0,2],[3,4],[3,5]]
-        sel_ang=[[1,3,2],[0,3,6],[4,3,5]]
+        sel_dist=[[0,3],[3,4],[1,2]]
+        sel_ang=[[0,1,3],[1,3,4]]
         sel_coord=[]
         normalize_range=(0,1)
         include_index = False
         seg_window = 10
 
         # frame feature pre
-        dist = count_dist(self.dlc_raw, sel_dist)[1:]
-        ang = count_angle(self.dlc_raw, sel_ang)[1:]
-        disp = count_disp(self.dlc_raw, step=1, threshold=None)
+        dist = count_dist(self.dlc_raw, sel_dist)
+        ang = count_angle(self.dlc_raw, sel_ang)
+        # disp = count_disp(self.dlc_raw, step=1, threshold=None)
         # frame feature
-        feat = dist[:,0:2]
-        feat = np.hstack([feat, ang[:,0:1]])
-        feat = np.hstack([feat, disp[:,0:1]])
-        # segment feature
-        # seg = abs(fft_signal(feat, window=seg_window, flat=True))
-        seg = cwt_signal(feat, window=10, step=1)
-        # combine
-        tmp = np.hstack([dist, ang])
-        feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=1)])
-        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=10, step=1)])
+        feat = dist
+        feat = np.hstack([feat, ang])
+        # feat = np.hstack([feat, disp[:,0:1]])
         # normalize
         feat = feature_normalize(feat, normalize_range=normalize_range)
 
         self.feature = feat
+
+    def load_feature(self):
+        savfile = joblib.load(self.bsoidfile)
+        if len(savfile) > 10:
+            self.feature = savfile
+        else:
+            self.feature = savfile[0]
 
     ### train test config ##########################################################################
     def labeling(self, mclf=None, motion_score=None):
