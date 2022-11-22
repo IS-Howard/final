@@ -74,9 +74,9 @@ class DataSet:
             tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
             self.mice_feat.append(tmp)
 
-    def generate_train_test(self, split=0.5, motion_del=False):
+    def generate_train_test(self, split=0.5, motion_del=False, k=1):
         '''
-        validation setting as last of each three treatment mice
+        validation setting as last k-th of each three treatment mice
         '''
         # config for mice_feat
         for miceF in self.mice_feat:
@@ -93,13 +93,15 @@ class DataSet:
             self.data[s] = []
         for t in self.all_treatment:
             inds = self.ind[t]
-            for i in range(len(inds)-1): #last one for validate
+            for i in range(len(inds)): #last one for validate
+                if i==len(inds)-k:
+                    continue
                 ind = inds[i]
                 self.data['x_train'].append(self.mice_feat[ind].x_train)
                 self.data['y_train'].append(self.mice_feat[ind].y_train)
                 self.data['x_test'].append(self.mice_feat[ind].x_test)
                 self.data['y_test'].append(self.mice_feat[ind].y_test)
-            ind = inds[len(inds)-1]
+            ind = inds[len(inds)-k]
             self.data['x_val'].append(self.mice_feat[ind].feature)
             self.data['y_val'].append(self.mice_feat[ind].label)
 
