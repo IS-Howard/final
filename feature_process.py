@@ -125,13 +125,13 @@ def count_mice_area(vid_path, stop=None):
 #################################################################################################
 
 ### segment feature #############################################################################
-def seg_statistic(feat, count_types=['avg'], window=10, step=1):
+def seg_statistic(feat, count_types=['avg'], window=10, step=10):
     '''
     feature statistic feature from each window of segment
     '''
     msk_feat = []
-    for i in range(int(len(feat)/window)):
-        msk = feat[i*window:i*window+window]
+    for i in range(int(len(feat)/step)-1):
+        msk = feat[i*step:i*step+window]
         newfeat = []
         if 'max' in count_types:
             newfeat.append(np.max(msk, axis=0))
@@ -143,36 +143,31 @@ def seg_statistic(feat, count_types=['avg'], window=10, step=1):
             newfeat.append(np.std(msk, axis=0))
         if 'sum' in count_types:
             newfeat.append(np.sum(msk, axis=0))
-        # if 'fft' in count_types:
-        #     freq = fft(feat.T)
-        #     freq_feat = []
-        #     for feat_freq in freq:
-        #         newfeat.extend(feat_freq)
 
         newfeat = np.concatenate(newfeat)
         msk_feat.append(newfeat)
     return np.array(msk_feat)
 
-def generate_tmpfeat(feat):
+def generate_tmpfeat(feat, window=10, step=10):
     '''
     segment of feature
     '''
     tmp_feat = []
-    for i in range(int(len(feat)/10)):
-        tmp_feat.append(feat[i*10:i*10+10])
+    for i in range(int(len(feat)/step)-1):
+        tmp_feat.append(feat[i*step:i*step+window])
     return np.array(tmp_feat)
 
 
 ### wave feature #############################################################################
-def cwt_signal(feat, window=10, step=1):
+def cwt_signal(feat, window=10, step=10):
     '''
     count the continious wavelet transform of all signal
     min_len : shortest signal (longest wavelet)
     sample_len : taking samples through frames to keep same length for all result
     '''
     powers = []
-    for i in range(int(len(feat)/window)):
-        x = feat[i*window:i*window+window]
+    for i in range(int(len(feat)/step)-1):
+        x = feat[i*step:i*step+window]
         t = np.arange(len(x))
         dt = 1              # sampling frequency
         dj = 0.2             # scale distribution parameter

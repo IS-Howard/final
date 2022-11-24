@@ -260,11 +260,11 @@ class miceFeature:
         feat = np.hstack([feat, disp[:,0:1]])
         # segment feature
         # seg = abs(fft_signal(feat, window=seg_window, flat=True))
-        seg = cwt_signal(feat, window=10, step=1)
+        seg = cwt_signal(feat, window=10, step=10)
         # combine
         tmp = np.hstack([dist, ang])
-        feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=1)])
-        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=10, step=1)])
+        feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=10)])
+        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=10, step=10)])
         # normalize
         feat = feature_normalize(feat, normalize_range=normalize_range)
 
@@ -317,8 +317,15 @@ class miceFeature:
             self.y_test = label[sp:]
                 
 class Analysis:
-    def __init__(self):
-        self.model = SVC(kernel='rbf', C=1000)
+    def __init__(self, model_type='svm'):
+        if model_type == 'svm':
+            self.model = SVC(kernel='rbf', C=1000)
+        elif model_type == 'rf':
+            self.model = RandomForestClassifier(random_state=42)
+        elif model_type == 'dnn':
+            print("dnn")
+        elif model_type == 'lstm':
+            print('lstm')
 
     def train(self, x, y):
         self.model = self.model.fit(x,y)
@@ -333,6 +340,16 @@ class Analysis:
         pred = self.model.predict(x)
         if score:
             print('accuracy = ', accuracy_score(y, pred))
+        self.analysis(y,pred)
         cm = confusion_matrix(y, pred, labels=self.model.classes_)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
         disp.plot()
+
+    def analysis(self, y, pred):
+        tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
+        tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
+        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))) )
+        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1))) | ((y==2) & ((pred==0)|(pred==-1))) )
+        print("false alarm: ", fp/(fp+tn))
+        print("detection rate: ", tp/(tp+fn))
+
