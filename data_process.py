@@ -1,6 +1,7 @@
 from feature_process import *
 from pose_cluster import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+import tensorflow as tf
 
 class DataSet:
     '''
@@ -248,25 +249,39 @@ class miceFeature:
         sel_coord=[]
         normalize_range=(0,1)
         include_index = False
-        seg_window = 10
-
+        window = 10
+        step = 5
+#########bsoid + cwt (full/half)#################
+        # # frame feature pre
+        # dist = count_dist(self.dlc_raw, sel_dist)[1:]
+        # ang = count_angle(self.dlc_raw, sel_ang)[1:]
+        # disp = count_disp(self.dlc_raw, step=1, threshold=None)
+        # # frame feature
+        # feat = dist[:,0:2]
+        # feat = np.hstack([feat, ang[:,0:1]])
+        # feat = np.hstack([feat, disp[:,0:1]])
+        # # segment feature
+        # # seg = abs(fft_signal(feat, window=seg_window, flat=True))
+        # seg = cwt_signal(feat, window=window, step=step)
+        # # combine
+        # tmp = np.hstack([dist, ang])
+        # feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=window, step=step)])
+        # feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
+        # # normalize
+        # feat = feature_normalize(feat, normalize_range=normalize_range)
+########## bsoid #############################
         # frame feature pre
         dist = count_dist(self.dlc_raw, sel_dist)[1:]
         ang = count_angle(self.dlc_raw, sel_ang)[1:]
         disp = count_disp(self.dlc_raw, step=1, threshold=None)
-        # frame feature
-        feat = dist[:,0:2]
-        feat = np.hstack([feat, ang[:,0:1]])
-        feat = np.hstack([feat, disp[:,0:1]])
-        # segment feature
-        # seg = abs(fft_signal(feat, window=seg_window, flat=True))
-        seg = cwt_signal(feat, window=10, step=10)
         # combine
         tmp = np.hstack([dist, ang])
-        feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=10, step=10)])
-        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=10, step=10)])
+        feat = seg_statistic(tmp, count_types=['avg'], window=window, step=step)
+        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
         # normalize
         feat = feature_normalize(feat, normalize_range=normalize_range)
+########### LSTM ############################################
+        
 
         self.feature = feat
 
@@ -317,15 +332,15 @@ class miceFeature:
             self.y_test = label[sp:]
                 
 class Analysis:
-    def __init__(self, model_type='svm'):
+    def __init__(self, model_type='svm', classes=3):
         if model_type == 'svm':
             self.model = SVC(kernel='rbf', C=1000)
         elif model_type == 'rf':
             self.model = RandomForestClassifier(random_state=42)
         elif model_type == 'dnn':
-            print("dnn")
+            self.model = DNN_model(classes)
         elif model_type == 'lstm':
-            print('lstm')
+            self.model = LSTM_model(classes)
 
     def train(self, x, y):
         self.model = self.model.fit(x,y)
@@ -340,7 +355,7 @@ class Analysis:
         pred = self.model.predict(x)
         if score:
             print('accuracy = ', accuracy_score(y, pred))
-        self.analysis(y,pred)
+            self.analysis(y, pred)
         cm = confusion_matrix(y, pred, labels=self.model.classes_)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
         disp.plot()
@@ -350,6 +365,72 @@ class Analysis:
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
         fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))) )
         fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1))) | ((y==2) & ((pred==0)|(pred==-1))) )
-        print("false alarm: ", fp/(fp+tn))
-        print("detection rate: ", tp/(tp+fn))
+        if (fp+tn)==0:
+            fa = 0
+        else:
+            fa = fp/(fp+tn)
+        if (tp+fn)==0:
+            dr = 0
+        else:
+            dr = tp/(tp+fn)
+        print("false alarm: ", fa)
+        print("detection rate: ", dr)
 
+
+class LSTM_model:
+    def __init__(self, classes):
+        self.classes = classes
+        self.build_model()
+
+    def build_model(self):
+        self.model = tf.keras.models.Sequential()
+        self.model.add(tf.keras.layers.LSTM(32, return_sequences=False))
+        self.model.add(tf.keras.layers.Dropout(0.2))
+        self.model.add(tf.keras.layers.BatchNormalization())
+        self.model.add(tf.keras.layers.Dense(self.classes, activation='softmax'))
+        opt = tf.keras.optimizers.Adam(learning_rate=0.01)
+        self.model.compile(optimizer=opt,
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    
+    def fit(self, x, y):
+        self.classes_ = np.arange(self.classes)
+        if self.classes == 4:
+            self.classes_ = self.classes_-1
+        callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=500, batch_size=16,callbacks=callbacks)
+
+    def predict(self, x):
+        if self.classes == 4:
+            return np.argmax(self.model.predict(x), axis=1)-1
+        return np.argmax(self.model.predict(x), axis=1)
+
+class DNN_model:
+    def __init__(self, classes):
+        self.classes = classes
+        self.build_model()
+    def build_model(self):
+        self.model = tf.keras.models.Sequential()
+        self.model.add(tf.keras.layers.Dense(32))
+        self.model.add(tf.keras.layers.Dropout(0.2))
+        self.model.add(tf.keras.layers.Dense(32))
+        self.model.add(tf.keras.layers.Dropout(0.2))
+        self.model.add(tf.keras.layers.BatchNormalization())
+        self.model.add(tf.keras.layers.Dense(self.classes, activation='softmax'))
+        opt = tf.keras.optimizers.Adam(learning_rate=0.01)
+        self.model.compile(optimizer=opt,
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    def fit(self, x, y):
+        self.classes_ = np.arange(self.classes)
+        if self.classes == 4:
+            self.classes_ = self.classes_-1
+        callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=500, batch_size=16,callbacks=callbacks)
+        return self
+
+    def predict(self, x):
+        if self.classes == 4:
+            return np.argmax(self.model.predict(x), axis=1)-1
+        return np.argmax(self.model.predict(x), axis=1)
