@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 # cluster
 from sklearn.decomposition import PCA
 import umap
-import hdbscan
+# import hdbscan
 from sklearn.cluster import SpectralClustering
 from sklearn.cluster import KMeans
 from sklearn.cluster import AffinityPropagation
@@ -46,16 +46,16 @@ def embedfeat(feat, num_dimensions=None, sel=[], savename=None):
 def motion_cluster(feat, k=None, cls_type='hdbscan'):
     if cls_type=='hdbscan':
         mcls=None
-        min_c = k
-        print("min cluster size: ", int(round(min_c * 0.01 * feat.shape[0])))
-        learned_hierarchy = hdbscan.HDBSCAN(
-                            prediction_data=True, min_cluster_size=int(round(min_c * 0.01 * embeddings.shape[0])),
-                            min_samples=1).fit(feat)
-        labels = learned_hierarchy.labels_
-        assign_prob = hdbscan.all_points_membership_vectors(learned_hierarchy)
-        assignments = np.argmax(assign_prob, axis=1)
+        # min_c = k
+        # print("min cluster size: ", int(round(min_c * 0.01 * feat.shape[0])))
+        # learned_hierarchy = hdbscan.HDBSCAN(
+        #                     prediction_data=True, min_cluster_size=int(round(min_c * 0.01 * embeddings.shape[0])),
+        #                     min_samples=1).fit(feat)
+        # labels = learned_hierarchy.labels_
+        # assign_prob = hdbscan.all_points_membership_vectors(learned_hierarchy)
+        # assignments = np.argmax(assign_prob, axis=1)
     elif cls_type=='spec':
-        mcls = SpectralClustering(n_clusters=k, assign_labels='discretize', random_state=0).fit(embeddings)
+        mcls = SpectralClustering(n_clusters=k, assign_labels='discretize', random_state=0).fit(feat)
         assignments = mcls.labels_
     elif cls_type=='km':
         mcls = KMeans(n_clusters=k).fit(feat)
