@@ -159,7 +159,7 @@ def generate_tmpfeat(feat, window=10, step=10):
 
 
 ### wave feature #############################################################################
-def cwt_signal(feat, window=10, step=10):
+def cwt_signal(feat, window=10, step=10, flat=True):
     '''
     count the continious wavelet transform of all signal
     min_len : shortest signal (longest wavelet)
@@ -175,7 +175,11 @@ def cwt_signal(feat, window=10, step=10):
         wa = transform.WaveletTransformTorch(dt, dj, wavelet, cuda=False)
 
         #cwt = wa.cwt(x) # Eular format
-        powers.append(wa.power(x).flatten())
+        if flat:
+            powers.append(wa.power(x).flatten())
+        else:
+            shp = np.prod(wa.power(x).shape[1:])
+            powers.append(wa.power(x).reshape(window,shp))
 
     return np.array(powers)
 

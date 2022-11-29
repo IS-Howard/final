@@ -7,11 +7,12 @@ class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
-    def __init__(self, dlc, vidc=None, vids=None, dep=None, specific=[]):
+    def __init__(self, dlc, bsoid=None, vidc=None, vids=None, dep=None, specific=[]):
         self.specific = specific
         self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
         self.files = {}
         self.files['dlc'] = self.load_paths(dlc, True)
+        self.files['bsoid'] = self.load_paths(bsoid)
         self.files['vids'] = self.load_paths(vids)
         self.files['vidc'] = self.load_paths(vidc)
         self.files['dep'] = self.load_paths(dep)
@@ -69,10 +70,13 @@ class DataSet:
             return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
         return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j==treatment]
     
-    def generate_feature(self):
+    def generate_feature(self, bsoid=False):
         self.mice_feat = []
         for i in range(len(self.files['dlc'])):
-            tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
+            if bsoid:
+                tmp = miceFeature(self.treatments[i], bsoid=self.files['bsoid'][i])
+            else:
+                tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
             self.mice_feat.append(tmp)
 
     def generate_train_test(self, split=0.5, motion_del=False, k=1):
@@ -210,11 +214,14 @@ class miceFeature:
     '''
     Storing All data(file paths, landmarks, features ...) of single mice(file)
     '''
-    def __init__(self, treatment, dlc=None, vidc=None, vids=None, dep=None):
+    def __init__(self, treatment, dlc=None, bsoid=None, vidc=None, vids=None, dep=None):
         self.treatment = treatment
         if(dlc):
             self.dlcfile = dlc
             self.read_dlc()
+        if(bsoid):
+            self.bsoidfile = bsoid
+            self.load_bsoid()
         if(vidc):
             self.vidcfile = vidc
         if(vids):
@@ -239,6 +246,13 @@ class miceFeature:
         self.dlc_index = self.dlc_index[notnan]
     def dlc_wrap(self):
         return np.resize(self.dlc_raw,(len(self.dlc_raw),int(self.dlc_raw.shape[1]/2),2))
+    
+    def load_bsoid(self):
+        savfile = joblib.load(self.bsoidfile)
+        if len(savfile) > 10:
+            self.feature = savfile
+        else:
+            self.feature = savfile[0]
     ###############################################################################################
     
     ### generate feature ##########################################################################
