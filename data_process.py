@@ -2,6 +2,7 @@ from feature_process import *
 from pose_cluster import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
 import tensorflow as tf
+import csv
 
 class DataSet:
     '''
@@ -70,13 +71,13 @@ class DataSet:
             return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j.find('basal')!=-1]
         return [self.data[sel_type][i] for i, j in enumerate(self.treatments) if j==treatment]
     
-    def generate_feature(self, bsoid=False):
+    def generate_feature(self, feat_type='frame'):
         self.mice_feat = []
         for i in range(len(self.files['dlc'])):
-            if bsoid:
-                tmp = miceFeature(self.treatments[i], bsoid=self.files['bsoid'][i])
+            if feat_type[:-1] == 'bs':
+                tmp = miceFeature(self.treatments[i], bsoid=self.files['bsoid'][i], feat_type=feat_type)
             else:
-                tmp = miceFeature(self.treatments[i], self.files['dlc'][i])#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
+                tmp = miceFeature(self.treatments[i], self.files['dlc'][i], feat_type=feat_type)#,self.files['vidc'][i],self.files['vids'][i],self.files['dep'][i])
             self.mice_feat.append(tmp)
 
     def generate_train_test(self, split=0.5, motion_del=False, k=1):
@@ -214,14 +215,13 @@ class miceFeature:
     '''
     Storing All data(file paths, landmarks, features ...) of single mice(file)
     '''
-    def __init__(self, treatment, dlc=None, bsoid=None, vidc=None, vids=None, dep=None):
+    def __init__(self, treatment, dlc=None, bsoid=None, vidc=None, vids=None, dep=None, feat_type='frame'):
         self.treatment = treatment
         if(dlc):
             self.dlcfile = dlc
             self.read_dlc()
         if(bsoid):
             self.bsoidfile = bsoid
-            self.load_bsoid()
         if(vidc):
             self.vidcfile = vidc
         if(vids):
@@ -229,7 +229,7 @@ class miceFeature:
         if(dep):
             self.depfile = dep
 
-        self.count_feature()
+        self.count_feature(feat_type=feat_type)
     
     ### DLC functions #############################################################################
     def read_dlc(self):
@@ -246,17 +246,10 @@ class miceFeature:
         self.dlc_index = self.dlc_index[notnan]
     def dlc_wrap(self):
         return np.resize(self.dlc_raw,(len(self.dlc_raw),int(self.dlc_raw.shape[1]/2),2))
-    
-    def load_bsoid(self):
-        savfile = joblib.load(self.bsoidfile)
-        if len(savfile) > 10:
-            self.feature = savfile
-        else:
-            self.feature = savfile[0]
     ###############################################################################################
     
     ### generate feature ##########################################################################
-    def count_feature(self):
+    def count_feature(self, feat_type='frame'):
         # config
         sel_dist=[[0,3],[3,6],[0,1],[0,2],[3,4],[3,5]]
         sel_ang=[[1,3,2],[0,3,6],[4,3,5]]
@@ -264,39 +257,79 @@ class miceFeature:
         normalize_range=(0,1)
         include_index = False
         window = 10
-        step = 5
-#########bsoid + cwt (full/half)#################
-        # # frame feature pre
-        # dist = count_dist(self.dlc_raw, sel_dist)[1:]
-        # ang = count_angle(self.dlc_raw, sel_ang)[1:]
-        # disp = count_disp(self.dlc_raw, step=1, threshold=None)
-        # # frame feature
-        # feat = dist[:,0:2]
-        # feat = np.hstack([feat, ang[:,0:1]])
-        # feat = np.hstack([feat, disp[:,0:1]])
-        # # segment feature
-        # # seg = abs(fft_signal(feat, window=seg_window, flat=True))
-        # seg = cwt_signal(feat, window=window, step=step)
-        # # combine
-        # tmp = np.hstack([dist, ang])
-        # feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=window, step=step)])
-        # feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
-        # # normalize
-        # feat = feature_normalize(feat, normalize_range=normalize_range)
-########## bsoid #############################
-        # frame feature pre
-        dist = count_dist(self.dlc_raw, sel_dist)[1:]
-        ang = count_angle(self.dlc_raw, sel_ang)[1:]
-        disp = count_disp(self.dlc_raw, step=1, threshold=None)
-        # combine
-        tmp = np.hstack([dist, ang])
-        feat = seg_statistic(tmp, count_types=['avg'], window=window, step=step)
-        feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
-        # normalize
-        feat = feature_normalize(feat, normalize_range=normalize_range)
-########### LSTM ############################################
-        
+        if feat_type[-1]=='F':
+            step = 10
+        else:
+            step = 5
 
+########### frame ################################################
+        if feat_type == 'frame':
+            # config frame
+            sel_dist=[[0,3],[3,4],[1,2]]
+            sel_ang=[[0,1,3],[1,3,4]]
+            # frame feature pre
+            dist = count_dist(self.dlc_raw, sel_dist)
+            ang = count_angle(self.dlc_raw, sel_ang)
+            # disp = count_disp(self.dlc_raw, step=1, threshold=None)
+            # frame feature
+            feat = dist
+            feat = np.hstack([feat, ang])
+            # feat = np.hstack([feat, disp[:,0:1]])
+            # normalize
+            feat = feature_normalize(feat, normalize_range=normalize_range)
+#########bsoid + cwt (full/half)##################################
+        if feat_type[:-1] == 'bscwt':
+            # frame feature pre
+            dist = count_dist(self.dlc_raw, sel_dist)[1:]
+            ang = count_angle(self.dlc_raw, sel_ang)[1:]
+            disp = count_disp(self.dlc_raw, step=1, threshold=None)
+            # frame feature
+            feat = dist[:,0:2]
+            feat = np.hstack([feat, ang[:,0:1]])
+            feat = np.hstack([feat, disp[:,0:1]])
+            # segment feature
+            # seg = abs(fft_signal(feat, window=seg_window, flat=True))
+            seg = cwt_signal(feat, window=window, step=step)
+            # combine
+            tmp = np.hstack([dist, ang])
+            feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=window, step=step)])
+            feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
+            # normalize
+            feat = feature_normalize(feat, normalize_range=normalize_range)
+########## bsoid ##########################################################
+        if feat_type[:-1] == 'bs':
+            savfile = joblib.load(self.bsoidfile)
+            if len(savfile) > 10:
+                feat = savfile
+            else:
+                feat = savfile[0]
+########### bsoid LSTM ############################################
+        if feat_type[:-1] == 'bsLSTM':
+            # frame feature pre
+            dist = count_dist(self.dlc_raw, sel_dist)[1:]
+            ang = count_angle(self.dlc_raw, sel_ang)[1:]
+            disp = count_disp(self.dlc_raw, step=1, threshold=None)
+            # segment feature combine
+            tmp = np.hstack([dist, ang, disp])
+            tmp = feature_normalize(tmp, normalize_range=normalize_range)
+            feat = generate_tmpfeat(tmp, window=window, step=step)
+########### bsoid + cwt LSTM ############################################
+        if feat_type[:-1] == 'bscwtLSTM':
+            # frame feature pre
+            dist = count_dist(self.dlc_raw, sel_dist)[1:]
+            ang = count_angle(self.dlc_raw, sel_ang)[1:]
+            disp = count_disp(self.dlc_raw, step=1, threshold=None)
+            # frame feature
+            feat = dist[:,0:2]
+            feat = np.hstack([feat, ang[:,0:1]])
+            feat = np.hstack([feat, disp[:,0:1]])
+            # segment feature combine
+            seg = cwt_signal(feat, window=window, step=step, flat=False)
+            tmp = np.hstack([dist, ang, disp])
+            tmp = feature_normalize(tmp, normalize_range=normalize_range)
+            feat = generate_tmpfeat(tmp, window=window, step=step)
+            feat = np.concatenate([feat, seg], axis=2)
+#########################################################################
         self.feature = feat
 
     ### train test config ##########################################################################
@@ -346,7 +379,8 @@ class miceFeature:
             self.y_test = label[sp:]
                 
 class Analysis:
-    def __init__(self, model_type='svm', classes=3):
+    def __init__(self, model_type='svm', classes=3, save_path=''):
+        self.save_path = ''
         if model_type == 'svm':
             self.model = SVC(kernel='rbf', C=1000)
         elif model_type == 'rf':
@@ -368,17 +402,20 @@ class Analysis:
     def plot_cm(self, x, y, score=True):
         pred = self.model.predict(x)
         if score:
-            print('accuracy = ', accuracy_score(y, pred))
+            # print('accuracy = ', accuracy_score(y, pred))
             self.analysis(y, pred)
         cm = confusion_matrix(y, pred, labels=self.model.classes_)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
         disp.plot()
+        if(len(self.save_path)>0):
+            disp.savefig(save_path+'/cm.png')
 
     def analysis(self, y, pred):
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
         fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))) )
-        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1))) | ((y==2) & ((pred==0)|(pred==-1))) )
+        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1))) )
+        tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
         if (fp+tn)==0:
             fa = 0
         else:
@@ -387,8 +424,20 @@ class Analysis:
             dr = 0
         else:
             dr = tp/(tp+fn)
+        acc = (tp+tn)/(tp+tn+fp+fn+tolor)
+        print('accuracy = ', acc)
         print("false alarm: ", fa)
         print("detection rate: ", dr)
+        if(len(self.save_path)>0):
+            file = open(r'C:\Users\x\Desktop\final_data/analysis.csv',mode='a', newline='')
+            writer = csv.writer(file)
+            save_path = self.save_path
+            if(save_path[-1]=='/'or save_path[-1]=='\\'):
+                save_path = save_path[:-1]
+            save_path = save_path.split('/')[-1]
+            save_path = save_path.split('\\')[-1]
+            writer.writerow([save_path,acc,fa,dr])
+            file.close()
 
 
 class LSTM_model:
