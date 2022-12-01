@@ -86,6 +86,9 @@ def motion_clf(x, y, test_part=0.1, score=True, savename=None, clf_type='svm'):
     return clf
 
 def motion_predict(feat, clf, embeder=None):
+     # if is lstm => flatten to 2d feature
+    if len(feat.shape)>2:
+        feat = feat.reshape(len(feat), feat.shape[1]*feat.shape[2])
     if embeder:
         test_embedding = embeder.transform(feat)
     else:

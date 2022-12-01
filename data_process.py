@@ -159,6 +159,9 @@ class DataSet:
             for miceF in miceFs:
                 feat.append(miceF.feature)
         feat = np.concatenate(feat)
+        # if is lstm => flatten to 2d feature
+        if len(feat.shape)>2:
+            feat = feat.reshape(len(feat), feat.shape[1]*feat.shape[2])
         # cluster
         if embed:
             embeder, embeddings = embedfeat(feat)
@@ -203,7 +206,8 @@ class DataSet:
         plt.bar(x + width, motionsT, width, color='red', label='treat')
         plt.xticks(x + width / 2, x)
         plt.legend(bbox_to_anchor=(1,1), loc='upper left')
-        plt.show()
+        #plt.show()
+        #plt.savefig()
         self.mclf = mclf
         self.motionsB = motionsB
         self.motionsT = motionsT
@@ -335,7 +339,7 @@ class miceFeature:
     ### train test config ##########################################################################
     def labeling(self, mclf=None, motion_score=None):
         # pain:1 sng:2 health:0
-        labels = np.zeros_like(self.feature[:,0], dtype=int)
+        labels = np.zeros((self.feature.shape[0]), dtype=int)
         if self.treatment == 'pH5.2':
             labels[:] = 2
         elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
@@ -380,7 +384,9 @@ class miceFeature:
                 
 class Analysis:
     def __init__(self, model_type='svm', classes=3, save_path=''):
-        self.save_path = ''
+        self.save_path = save_path
+        if len(save_path)>0 and not os.path.isdir(save_path):
+            os.makedirs(save_path)
         if model_type == 'svm':
             self.model = SVC(kernel='rbf', C=1000)
         elif model_type == 'rf':
@@ -408,7 +414,8 @@ class Analysis:
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
         disp.plot()
         if(len(self.save_path)>0):
-            disp.savefig(save_path+'/cm.png')
+            plt.savefig(self.save_path+'/cm.png')
+            plt.clf()
 
     def analysis(self, y, pred):
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
@@ -461,7 +468,8 @@ class LSTM_model:
         if self.classes == 4:
             self.classes_ = self.classes_-1
         callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
-        self.model.fit(x, tf.one_hot(y,self.classes), epochs=500, batch_size=16,callbacks=callbacks)
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16)#,callbacks=callbacks)
+        return self
 
     def predict(self, x):
         if self.classes == 4:
@@ -490,7 +498,7 @@ class DNN_model:
         if self.classes == 4:
             self.classes_ = self.classes_-1
         callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
-        self.model.fit(x, tf.one_hot(y,self.classes), epochs=500, batch_size=16,callbacks=callbacks)
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16)#,callbacks=callbacks)
         return self
 
     def predict(self, x):
