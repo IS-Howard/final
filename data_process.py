@@ -397,7 +397,12 @@ class Analysis:
             self.model = LSTM_model(classes)
 
     def train(self, x, y):
-        self.model = self.model.fit(x,y)
+        if(len(self.save_path)>0 and os.path.isfile(self.save_path+'./model.sav')):
+            self.model = joblib.load(self.save_path+'./model.sav')
+        else:
+            self.model = self.model.fit(x,y)
+            # if(len(self.save_path)>0):
+            #     joblib.dump(self.model, self.save_path+'./model.sav')
 
     def test(self, x, y, show=False):
         sc = self.model.score(x, y)
@@ -420,9 +425,9 @@ class Analysis:
     def analysis(self, y, pred):
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
-        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))) )
-        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1))) )
-        tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
+        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2)))  |((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
+        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1)))  |((y==0) & (pred==-1)) | ((y==-1) & (pred==0)) ) # mis negative
+        # tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
         if (fp+tn)==0:
             fa = 0
         else:
@@ -431,7 +436,7 @@ class Analysis:
             dr = 0
         else:
             dr = tp/(tp+fn)
-        acc = (tp+tn)/(tp+tn+fp+fn+tolor)
+        acc = (tp+tn)/(tp+tn+fp+fn)
         print('accuracy = ', acc)
         print("false alarm: ", fa)
         print("detection rate: ", dr)
