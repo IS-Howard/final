@@ -341,7 +341,7 @@ class miceFeature:
         # pain:1 sng:2 health:0
         labels = np.zeros((self.feature.shape[0]), dtype=int)
         if self.treatment == 'pH5.2':
-            labels[:] = 2
+            labels[:] = 1
         elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
             labels[:] = 0
         elif self.treatment == 'Cap':
@@ -425,9 +425,9 @@ class Analysis:
     def analysis(self, y, pred):
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
-        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2)))  |((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
-        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1)))  |((y==0) & (pred==-1)) | ((y==-1) & (pred==0)) ) # mis negative
-        # tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
+        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))))  #|((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
+        fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1))))  #|((y==0) & (pred==-1)) | ((y==-1) & (pred==0)) ) # mis negative
+        tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
         if (fp+tn)==0:
             fa = 0
         else:
@@ -436,7 +436,7 @@ class Analysis:
             dr = 0
         else:
             dr = tp/(tp+fn)
-        acc = (tp+tn)/(tp+tn+fp+fn)
+        acc = (tp+tn+tolar)/(tp+tn+fp+fn+tolar)
         print('accuracy = ', acc)
         print("false alarm: ", fa)
         print("detection rate: ", dr)
