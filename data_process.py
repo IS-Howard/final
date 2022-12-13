@@ -1,6 +1,6 @@
 from feature_process import *
 from pose_cluster import *
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, roc_curve, RocCurveDisplay
 import tensorflow as tf
 import csv
 
@@ -341,7 +341,7 @@ class miceFeature:
         # pain:1 sng:2 health:0
         labels = np.zeros((self.feature.shape[0]), dtype=int)
         if self.treatment == 'pH5.2':
-            labels[:] = 1
+            labels[:] = 2
         elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
             labels[:] = 0
         elif self.treatment == 'Cap':
@@ -383,10 +383,7 @@ class miceFeature:
             self.y_test = label[sp:]
                 
 class Analysis:
-    def __init__(self, model_type='svm', classes=3, save_path=''):
-        self.save_path = save_path
-        if len(save_path)>0 and not os.path.isdir(save_path):
-            os.makedirs(save_path)
+    def __init__(self, model_type='svm', classes=3):
         if model_type == 'svm':
             self.model = SVC(kernel='rbf', C=1000)
         elif model_type == 'rf':
@@ -397,12 +394,7 @@ class Analysis:
             self.model = LSTM_model(classes)
 
     def train(self, x, y):
-        if(len(self.save_path)>0 and os.path.isfile(self.save_path+'./model.sav')):
-            self.model = joblib.load(self.save_path+'./model.sav')
-        else:
-            self.model = self.model.fit(x,y)
-            # if(len(self.save_path)>0):
-            #     joblib.dump(self.model, self.save_path+'./model.sav')
+        self.model = self.model.fit(x,y)
 
     def test(self, x, y, show=False):
         sc = self.model.score(x, y)
@@ -410,24 +402,13 @@ class Analysis:
             print('accuracy = ',sc)
         return sc
 
-    def plot_cm(self, x, y, score=True):
+    def analysis(self, x, y):
         pred = self.model.predict(x)
-        if score:
-            # print('accuracy = ', accuracy_score(y, pred))
-            self.analysis(y, pred)
-        cm = confusion_matrix(y, pred, labels=self.model.classes_)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
-        disp.plot()
-        if(len(self.save_path)>0):
-            plt.savefig(self.save_path+'/cm.png')
-            plt.clf()
-
-    def analysis(self, y, pred):
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
-        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))))  #|((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
+        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2)))  |((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
         fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1))))  #|((y==0) & (pred==-1)) | ((y==-1) & (pred==0)) ) # mis negative
-        tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
+        toler = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
         if (fp+tn)==0:
             fa = 0
         else:
@@ -436,21 +417,11 @@ class Analysis:
             dr = 0
         else:
             dr = tp/(tp+fn)
-        acc = (tp+tn+tolar)/(tp+tn+fp+fn+tolar)
+        acc = (tp+tn+toler)/(tp+tn+fp+fn+toler)
         print('accuracy = ', acc)
         print("false alarm: ", fa)
         print("detection rate: ", dr)
-        if(len(self.save_path)>0):
-            file = open(r'C:\Users\x\Desktop\final_data/analysis.csv',mode='a', newline='')
-            writer = csv.writer(file)
-            save_path = self.save_path
-            if(save_path[-1]=='/'or save_path[-1]=='\\'):
-                save_path = save_path[:-1]
-            save_path = save_path.split('/')[-1]
-            save_path = save_path.split('\\')[-1]
-            writer.writerow([save_path,acc,fa,dr])
-            file.close()
-
+        return [acc,fa,dr]
 
 class LSTM_model:
     def __init__(self, classes):
