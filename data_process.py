@@ -385,7 +385,7 @@ class miceFeature:
 class Analysis:
     def __init__(self, model_type='svm', classes=3):
         if model_type == 'svm':
-            self.model = SVC(kernel='rbf', C=1000, probability=True)
+            self.model = SVC(kernel='rbf', C=1000)
         elif model_type == 'rf':
             self.model = RandomForestClassifier(random_state=42)
         elif model_type == 'dnn':
@@ -444,7 +444,7 @@ class LSTM_model:
         if self.classes == 4:
             self.classes_ = self.classes_-1
         callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
-        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16)#,callbacks=callbacks)
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16) #,callbacks=callbacks)
         return self
 
     def predict(self, x):
@@ -474,7 +474,7 @@ class DNN_model:
         if self.classes == 4:
             self.classes_ = self.classes_-1
         callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
-        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16)#,callbacks=callbacks)
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16) #,callbacks=callbacks)
         return self
 
     def predict(self, x):
