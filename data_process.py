@@ -350,7 +350,7 @@ class miceFeature:
             motions = motion_predict(self.feature, mclf)
             for i in range(len(motion_score)):
                 if motion_score[i] == -1:
-                    labels[np.where(motions==i)] = -1
+                    labels[np.where(motions==i)] = 0 ## bad motion label
         self.label=labels
          
     def train_config(self, split=0.5, shuffle=True, motion_del=False):
@@ -385,7 +385,7 @@ class miceFeature:
 class Analysis:
     def __init__(self, model_type='svm', classes=3):
         if model_type == 'svm':
-            self.model = SVC(kernel='rbf', C=1000)
+            self.model = SVC(kernel='rbf', C=1000, probability=True)
         elif model_type == 'rf':
             self.model = RandomForestClassifier(random_state=42)
         elif model_type == 'dnn':
