@@ -408,7 +408,7 @@ class Analysis:
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
         fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2)))  |((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
         fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1))))  #|((y==0) & (pred==-1)) | ((y==-1) & (pred==0)) ) # mis negative
-        toler = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
+        toler = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0))) # miss negative is useless
         if (fp+tn)==0:
             fa = 0
         else:
@@ -417,7 +417,7 @@ class Analysis:
             dr = 0
         else:
             dr = tp/(tp+fn)
-        acc = (tp+tn+toler)/(tp+tn+fp+fn+toler)
+        acc = (tp+tn)/(tp+tn+fp+fn)
         print('accuracy = ', acc)
         print("false alarm: ", fa)
         print("detection rate: ", dr)

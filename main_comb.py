@@ -10,7 +10,7 @@ save_root = r'C:\Users\x\Desktop\final_data/analysis2/'
 
 #skip finish
 cur=0
-fin = 59
+fin = 0
 
 for feat_type in feat_types:
     # feat type
