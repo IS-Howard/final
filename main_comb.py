@@ -10,7 +10,7 @@ save_root = r'C:\Users\x\Desktop\final_data/analysis2/'
 
 #skip finish
 cur=0
-fin = 0
+fin = 50
 
 for feat_type in feat_types:
     # feat type
@@ -31,7 +31,7 @@ for feat_type in feat_types:
         if add_cluster == 'Y':
             print('pose clustering...')
             dlc.pose_cls(sel=['Cap','Capbasal'], sel_num=20, embed=False, k=50, cls_type='km', clf_type='svm')
-            classes=4
+            classes=3
         else:
             classes=3
 
