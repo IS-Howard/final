@@ -1,6 +1,7 @@
 from feature_process import *
 from pose_cluster import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, roc_curve, RocCurveDisplay
+from sklearn.inspection import permutation_importance
 import tensorflow as tf
 import csv
 
@@ -402,8 +403,10 @@ class Analysis:
             print('accuracy = ',sc)
         return sc
 
-    def analysis(self, x, y):
+    def analysis(self, x, y, seperate=False):
         pred = self.model.predict(x)
+
+        # non-seperate
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
         fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2)))  |((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
@@ -422,6 +425,39 @@ class Analysis:
         print("false alarm: ", fa)
         print("detection rate: ", dr)
         return [acc,fa,dr]
+
+    def analysis2(self, x, y):
+        '''
+        seperate detection rate of pain/sng
+        '''
+        pred = self.model.predict(x)
+        tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
+        fn_p = np.count_nonzero((y==1) & ((pred==0)|(pred==-1)|(pred==2)))
+        tp_p = np.count_nonzero((y==1) & (pred==1))
+        # fp_p = np.count_nonzero(((y==0) & (pred==1)) | ((y==-1) & (pred==1)) | ((y==2) & (pred==1)) )
+        fn_s = np.count_nonzero((y==2) & ((pred==0)|(pred==-1)|(pred==1)))
+        tp_s = np.count_nonzero((y==2) & (pred==2))
+        # fp_s = np.count_nonzero(((y==0) & (pred==2)) | ((y==-1) & (pred==2)) | ((y==1) & (pred==2)) )
+        if (tp_p+fn_p)==0:
+            dr_p = 0
+        else:
+            dr_p = tp_p/(tp_p+fn_p)
+        if (tp_s+fn_s)==0:
+            dr_s = 0
+        else:
+            dr_s = tp_s/(tp_s+fn_s)
+        return [dr_p, dr_s]
+
+    def feat_importance(self, x, y, save_path=None):
+        r = permutation_importance(self.model, x, y, n_repeats=10, random_state=0)
+        feature_names = np.arange(len(x[0]))
+        features = np.array(feature_names)
+        sorted_idx = r.importances_mean.argsort()
+        plt.barh(features[sorted_idx], r.importances_mean[sorted_idx])
+        plt.xlabel("Permutation Importance")
+        if save_path:
+            plt.savefig(save_path)
+
 
 class LSTM_model:
     def __init__(self, classes):
