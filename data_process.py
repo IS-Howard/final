@@ -452,11 +452,12 @@ class Analysis:
         r = permutation_importance(self.model, x, y, n_repeats=10, random_state=0)
         feature_names = np.arange(len(x[0]))
         features = np.array(feature_names)
-        sorted_idx = r.importances_mean.argsort()
-        plt.barh(features[sorted_idx], r.importances_mean[sorted_idx])
+        # sorted_idx = r.importances_mean.argsort()
+        plt.barh(features, r.importances_mean)
         plt.xlabel("Permutation Importance")
         if save_path:
             plt.savefig(save_path)
+        return r.importances_mean
 
 
 class LSTM_model:
