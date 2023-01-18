@@ -5,13 +5,25 @@ from sklearn.inspection import permutation_importance
 import tensorflow as tf
 import csv
 
+def train_balance(x,y):
+    health = np.where(y==0)[0]
+    pain = np.where(y==1)[0]
+    sng = np.where(y==2)[0]
+    mins = min([len(health),len(pain),len(sng)])
+    health = np.random.choice(health, mins, replace=False)
+    pain = np.random.choice(pain, mins, replace=False)
+    sng = np.random.choice(sng, mins, replace=False)
+    newidx = np.concatenate([health,pain,sng])
+    return x[newidx],y[newidx]
+
 class DataSet:
     '''
     Storing dataset to train/to test, root of related files, info of each single mice
     '''
     def __init__(self, dlc, bsoid=None, vidc=None, vids=None, dep=None, specific=[]):
         self.specific = specific
-        self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
+        self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4',
+                                'pH5.2ASIC3KObasal','pH5.2ASIC3KO','CapTV1KObasal','CapTV1KO']
         self.files = {}
         self.files['dlc'] = self.load_paths(dlc, True)
         self.files['bsoid'] = self.load_paths(bsoid)
@@ -55,7 +67,9 @@ class DataSet:
         self.ind['basal'] = np.array([i for i, j in enumerate(self.treatments) if j.find('basal')!=-1])
         for t in self.all_treatment:
             self.ind[t] = np.array([i for i, j in enumerate(self.treatments) if j == t])
-        print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']))
+        print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),
+                ' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']),
+                ' sngKO:',len(self.ind['pH5.2ASIC3KO']),' CapKO:',len(self.ind['CapTV1KO']))
 
     def sel_file(self, filetype='dlc', treatment='Cap'):
         if treatment == 'basal':
@@ -98,51 +112,21 @@ class DataSet:
         self.data = {}
         for s in all_sets:
             self.data[s] = []
+
         for t in self.all_treatment:
             inds = self.ind[t]
-            for i in range(len(inds)): #last one for validate
-                if i==len(inds)-k:
+            k = k%len(inds)
+            for i in range(len(inds)):
+                if i==len(inds)-k-1:
                     continue
                 ind = inds[i]
                 self.data['x_train'].append(self.mice_feat[ind].x_train)
                 self.data['y_train'].append(self.mice_feat[ind].y_train)
                 self.data['x_test'].append(self.mice_feat[ind].x_test)
                 self.data['y_test'].append(self.mice_feat[ind].y_test)
-            ind = inds[len(inds)-k]
+            ind = inds[len(inds)-k-1]
             self.data['x_val'].append(self.mice_feat[ind].feature)
             self.data['y_val'].append(self.mice_feat[ind].label)
-
-    def generate_train_test2(self, split=0.5, motion_del=False):
-        '''
-        validation setting as pH7.4
-        '''
-        # config for mice_feat
-        for miceF in self.mice_feat:
-            if self.mclf:
-                miceF.labeling(self.mclf,self.motion_score)
-            else:
-                miceF.labeling()
-            miceF.train_config(split=split, motion_del=motion_del)
-
-        # start
-        all_sets = ['x_train','y_train','x_test','y_test','x_val','y_val']
-        self.data = {}
-        for s in all_sets:
-            self.data[s] = []
-        for t in ['Capbasal','Cap','pH5.2basal','pH5.2']:
-            inds = self.ind[t]
-            for i in range(len(inds)):
-                ind = inds[i]
-                self.data['x_train'].append(self.mice_feat[ind].x_train)
-                self.data['y_train'].append(self.mice_feat[ind].y_train)
-                self.data['x_test'].append(self.mice_feat[ind].x_test)
-                self.data['y_test'].append(self.mice_feat[ind].y_test)
-        for t in ['pH7.4basal','pH7.4']:
-            inds = self.ind[t]
-            for i in range(len(inds)):
-                ind = inds[i]
-                self.data['x_val'].append(self.mice_feat[ind].feature)
-                self.data['y_val'].append(self.mice_feat[ind].label)
 
     def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
         # miceF : miceFeature class object
@@ -256,7 +240,7 @@ class miceFeature:
     ### generate feature ##########################################################################
     def count_feature(self, feat_type='frame'):
         # config
-        sel_dist=[[0,3],[3,6],[0,1],[0,2],[3,4],[3,5]]
+        sel_dist=[[0,1],[0,2],[1,3],[2,3],[3,4],[3,5],[4,6],[5,6]]
         sel_ang=[[1,3,2],[0,3,6],[4,3,5]]
         sel_coord=[]
         normalize_range=(0,1)
@@ -289,14 +273,15 @@ class miceFeature:
             ang = count_angle(self.dlc_raw, sel_ang)[1:]
             disp = count_disp(self.dlc_raw, step=1, threshold=None)
             # frame feature
-            feat = dist[:,0:2]
-            feat = np.hstack([feat, ang[:,0:1]])
-            feat = np.hstack([feat, disp[:,0:1]])
+            feat = dist[:,5:6]
+            feat = np.hstack([feat, dist[:,7:8]])
+            feat = np.hstack([feat, ang[:,2:3]])
+            feat = np.hstack([feat, disp[:,2:3]])
             # segment feature
             # seg = abs(fft_signal(feat, window=seg_window, flat=True))
             seg = cwt_signal(feat, window=window, step=step)
             # combine
-            tmp = np.hstack([dist, ang])
+            tmp = np.hstack([disp, ang])
             feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=window, step=step)])
             feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
             # normalize
@@ -315,7 +300,7 @@ class miceFeature:
             ang = count_angle(self.dlc_raw, sel_ang)[1:]
             disp = count_disp(self.dlc_raw, step=1, threshold=None)
             # segment feature combine
-            tmp = np.hstack([dist, ang, disp])
+            tmp = np.hstack([disp, ang, disp])
             tmp = feature_normalize(tmp, normalize_range=normalize_range)
             feat = generate_tmpfeat(tmp, window=window, step=step)
 ########### bsoid + cwt LSTM ############################################
@@ -325,9 +310,10 @@ class miceFeature:
             ang = count_angle(self.dlc_raw, sel_ang)[1:]
             disp = count_disp(self.dlc_raw, step=1, threshold=None)
             # frame feature
-            feat = dist[:,0:2]
-            feat = np.hstack([feat, ang[:,0:1]])
-            feat = np.hstack([feat, disp[:,0:1]])
+            feat = dist[:,5:6]
+            feat = np.hstack([feat, dist[:,7:8]])
+            feat = np.hstack([feat, ang[:,2:3]])
+            feat = np.hstack([feat, disp[:,2:3]])
             # segment feature combine
             seg = cwt_signal(feat, window=window, step=step, flat=False)
             tmp = np.hstack([dist, ang, disp])
@@ -343,7 +329,8 @@ class miceFeature:
         labels = np.zeros((self.feature.shape[0]), dtype=int)
         if self.treatment == 'pH5.2':
             labels[:] = 2
-        elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
+        elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1 or \
+                self.treatment.find('pH5.2ASIC3KO')!=-1 or self.treatment.find('CapTV1KO')!=-1:
             labels[:] = 0
         elif self.treatment == 'Cap':
             labels[:] = 1
