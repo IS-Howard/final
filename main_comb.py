@@ -9,7 +9,7 @@ model_types=['svm', 'rf', 'dnn', 'lstm'] #'svm', 'rf', 'dnn', 'lstm'
 
 #skip finish
 cur=0
-fin = 0
+fin = 295
 
 for feat_type in feat_types:
     # feat type
@@ -54,14 +54,14 @@ for feat_type in feat_types:
 
                 res = []
 
-                dlc.generate_train_test(split=0.5, motion_del=False, k=i)
+                dlc.generate_train_test(split=0.1, motion_del=False, k=i)
 
                 # model
                 x_train = np.concatenate(dlc.data['x_train'])
                 y_train = np.concatenate(dlc.data['y_train'])
                 x_train,y_train = train_balance(x_train,y_train)
                 model = Analysis(model_type=model_type, classes=classes)
-                print('model training...')
+                print('model training... ('+str(i)+')')
                 model.train(x_train,y_train)
                 # res.extend(model.analysis(x_train, y_train))
                 print('model testing...')
