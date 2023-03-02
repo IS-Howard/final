@@ -482,9 +482,9 @@ class DNN_model:
         self.build_model()
     def build_model(self):
         self.model = tf.keras.models.Sequential()
-        self.model.add(tf.keras.layers.Dense(32))
+        self.model.add(tf.keras.layers.Dense(32),activation='relu')
         self.model.add(tf.keras.layers.Dropout(0.2))
-        self.model.add(tf.keras.layers.Dense(32))
+        self.model.add(tf.keras.layers.Dense(32),activation='relu')
         self.model.add(tf.keras.layers.Dropout(0.2))
         self.model.add(tf.keras.layers.BatchNormalization())
         self.model.add(tf.keras.layers.Dense(self.classes, activation='softmax'))
