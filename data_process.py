@@ -1,8 +1,20 @@
 from feature_process import *
 from pose_cluster import *
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, roc_curve, RocCurveDisplay
+from sklearn.inspection import permutation_importance
 import tensorflow as tf
 import csv
+
+def train_balance(x,y):
+    health = np.where(y==0)[0]
+    pain = np.where(y==1)[0]
+    sng = np.where(y==2)[0]
+    mins = min([len(health),len(pain),len(sng)])
+    health = np.random.choice(health, mins, replace=False)
+    pain = np.random.choice(pain, mins, replace=False)
+    sng = np.random.choice(sng, mins, replace=False)
+    newidx = np.concatenate([health,pain,sng])
+    return x[newidx],y[newidx]
 
 class DataSet:
     '''
@@ -10,7 +22,8 @@ class DataSet:
     '''
     def __init__(self, dlc, bsoid=None, vidc=None, vids=None, dep=None, specific=[]):
         self.specific = specific
-        self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4']
+        self.all_treatment = ['Capbasal','Cap','pH5.2basal','pH5.2','pH7.4basal','pH7.4',
+                                'pH5.2ASIC3KObasal','pH5.2ASIC3KO','CapTV1KObasal','CapTV1KO']
         self.files = {}
         self.files['dlc'] = self.load_paths(dlc, True)
         self.files['bsoid'] = self.load_paths(bsoid)
@@ -54,7 +67,9 @@ class DataSet:
         self.ind['basal'] = np.array([i for i, j in enumerate(self.treatments) if j.find('basal')!=-1])
         for t in self.all_treatment:
             self.ind[t] = np.array([i for i, j in enumerate(self.treatments) if j == t])
-        print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']))
+        print('basal:',len(self.ind['basal']),' ,pain:',len(self.ind['Cap']),
+                ' sng:',len(self.ind['pH5.2']),' pH7.4:',len(self.ind['pH7.4']),
+                ' sngKO:',len(self.ind['pH5.2ASIC3KO']),' CapKO:',len(self.ind['CapTV1KO']))
 
     def sel_file(self, filetype='dlc', treatment='Cap'):
         if treatment == 'basal':
@@ -97,51 +112,21 @@ class DataSet:
         self.data = {}
         for s in all_sets:
             self.data[s] = []
+
         for t in self.all_treatment:
             inds = self.ind[t]
-            for i in range(len(inds)): #last one for validate
-                if i==len(inds)-k:
+            k = k%len(inds)
+            for i in range(len(inds)):
+                if i==len(inds)-k-1:
                     continue
                 ind = inds[i]
                 self.data['x_train'].append(self.mice_feat[ind].x_train)
                 self.data['y_train'].append(self.mice_feat[ind].y_train)
                 self.data['x_test'].append(self.mice_feat[ind].x_test)
                 self.data['y_test'].append(self.mice_feat[ind].y_test)
-            ind = inds[len(inds)-k]
+            ind = inds[len(inds)-k-1]
             self.data['x_val'].append(self.mice_feat[ind].feature)
             self.data['y_val'].append(self.mice_feat[ind].label)
-
-    def generate_train_test2(self, split=0.5, motion_del=False):
-        '''
-        validation setting as pH7.4
-        '''
-        # config for mice_feat
-        for miceF in self.mice_feat:
-            if self.mclf:
-                miceF.labeling(self.mclf,self.motion_score)
-            else:
-                miceF.labeling()
-            miceF.train_config(split=split, motion_del=motion_del)
-
-        # start
-        all_sets = ['x_train','y_train','x_test','y_test','x_val','y_val']
-        self.data = {}
-        for s in all_sets:
-            self.data[s] = []
-        for t in ['Capbasal','Cap','pH5.2basal','pH5.2']:
-            inds = self.ind[t]
-            for i in range(len(inds)):
-                ind = inds[i]
-                self.data['x_train'].append(self.mice_feat[ind].x_train)
-                self.data['y_train'].append(self.mice_feat[ind].y_train)
-                self.data['x_test'].append(self.mice_feat[ind].x_test)
-                self.data['y_test'].append(self.mice_feat[ind].y_test)
-        for t in ['pH7.4basal','pH7.4']:
-            inds = self.ind[t]
-            for i in range(len(inds)):
-                ind = inds[i]
-                self.data['x_val'].append(self.mice_feat[ind].feature)
-                self.data['y_val'].append(self.mice_feat[ind].label)
 
     def pose_cls(self, sel=['random'], sel_num=20, embed=False, k=10, cls_type='km', clf_type='svm'):
         # miceF : miceFeature class object
@@ -255,7 +240,7 @@ class miceFeature:
     ### generate feature ##########################################################################
     def count_feature(self, feat_type='frame'):
         # config
-        sel_dist=[[0,3],[3,6],[0,1],[0,2],[3,4],[3,5]]
+        sel_dist=[[0,1],[0,2],[1,3],[2,3],[3,4],[3,5],[4,6],[5,6]]
         sel_ang=[[1,3,2],[0,3,6],[4,3,5]]
         sel_coord=[]
         normalize_range=(0,1)
@@ -288,14 +273,15 @@ class miceFeature:
             ang = count_angle(self.dlc_raw, sel_ang)[1:]
             disp = count_disp(self.dlc_raw, step=1, threshold=None)
             # frame feature
-            feat = dist[:,0:2]
-            feat = np.hstack([feat, ang[:,0:1]])
-            feat = np.hstack([feat, disp[:,0:1]])
+            feat = dist[:,5:6]
+            feat = np.hstack([feat, dist[:,7:8]])
+            feat = np.hstack([feat, ang[:,2:3]])
+            feat = np.hstack([feat, disp[:,2:3]])
             # segment feature
             # seg = abs(fft_signal(feat, window=seg_window, flat=True))
             seg = cwt_signal(feat, window=window, step=step)
             # combine
-            tmp = np.hstack([dist, ang])
+            tmp = np.hstack([disp, ang])
             feat = np.hstack([seg, seg_statistic(tmp, count_types=['avg'], window=window, step=step)])
             feat = np.hstack([feat, seg_statistic(dist, count_types=['sum'], window=window, step=step)])
             # normalize
@@ -314,7 +300,7 @@ class miceFeature:
             ang = count_angle(self.dlc_raw, sel_ang)[1:]
             disp = count_disp(self.dlc_raw, step=1, threshold=None)
             # segment feature combine
-            tmp = np.hstack([dist, ang, disp])
+            tmp = np.hstack([disp, ang, disp])
             tmp = feature_normalize(tmp, normalize_range=normalize_range)
             feat = generate_tmpfeat(tmp, window=window, step=step)
 ########### bsoid + cwt LSTM ############################################
@@ -324,9 +310,10 @@ class miceFeature:
             ang = count_angle(self.dlc_raw, sel_ang)[1:]
             disp = count_disp(self.dlc_raw, step=1, threshold=None)
             # frame feature
-            feat = dist[:,0:2]
-            feat = np.hstack([feat, ang[:,0:1]])
-            feat = np.hstack([feat, disp[:,0:1]])
+            feat = dist[:,5:6]
+            feat = np.hstack([feat, dist[:,7:8]])
+            feat = np.hstack([feat, ang[:,2:3]])
+            feat = np.hstack([feat, disp[:,2:3]])
             # segment feature combine
             seg = cwt_signal(feat, window=window, step=step, flat=False)
             tmp = np.hstack([dist, ang, disp])
@@ -341,8 +328,9 @@ class miceFeature:
         # pain:1 sng:2 health:0
         labels = np.zeros((self.feature.shape[0]), dtype=int)
         if self.treatment == 'pH5.2':
-            labels[:] = 1
-        elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1:
+            labels[:] = 2
+        elif self.treatment == 'pH7.4' or self.treatment.find('basal')!=-1 or \
+                self.treatment.find('pH5.2ASIC3KO')!=-1 or self.treatment.find('CapTV1KO')!=-1:
             labels[:] = 0
         elif self.treatment == 'Cap':
             labels[:] = 1
@@ -350,7 +338,7 @@ class miceFeature:
             motions = motion_predict(self.feature, mclf)
             for i in range(len(motion_score)):
                 if motion_score[i] == -1:
-                    labels[np.where(motions==i)] = -1
+                    labels[np.where(motions==i)] = 0 ## bad motion label
         self.label=labels
          
     def train_config(self, split=0.5, shuffle=True, motion_del=False):
@@ -383,10 +371,7 @@ class miceFeature:
             self.y_test = label[sp:]
                 
 class Analysis:
-    def __init__(self, model_type='svm', classes=3, save_path=''):
-        self.save_path = save_path
-        if len(save_path)>0 and not os.path.isdir(save_path):
-            os.makedirs(save_path)
+    def __init__(self, model_type='svm', classes=3):
         if model_type == 'svm':
             self.model = SVC(kernel='rbf', C=1000)
         elif model_type == 'rf':
@@ -397,12 +382,7 @@ class Analysis:
             self.model = LSTM_model(classes)
 
     def train(self, x, y):
-        if(len(self.save_path)>0 and os.path.isfile(self.save_path+'./model.sav')):
-            self.model = joblib.load(self.save_path+'./model.sav')
-        else:
-            self.model = self.model.fit(x,y)
-            # if(len(self.save_path)>0):
-            #     joblib.dump(self.model, self.save_path+'./model.sav')
+        self.model = self.model.fit(x,y)
 
     def test(self, x, y, show=False):
         sc = self.model.score(x, y)
@@ -410,24 +390,15 @@ class Analysis:
             print('accuracy = ',sc)
         return sc
 
-    def plot_cm(self, x, y, score=True):
+    def analysis(self, x, y, seperate=False):
         pred = self.model.predict(x)
-        if score:
-            # print('accuracy = ', accuracy_score(y, pred))
-            self.analysis(y, pred)
-        cm = confusion_matrix(y, pred, labels=self.model.classes_)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.model.classes_)
-        disp.plot()
-        if(len(self.save_path)>0):
-            plt.savefig(self.save_path+'/cm.png')
-            plt.clf()
 
-    def analysis(self, y, pred):
+        # non-seperate
         tp = np.count_nonzero(((y==1) & (pred==1)) | ((y==2) & (pred==2)))
         tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
-        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2))))  #|((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
+        fp = np.count_nonzero(((y==0) & ((pred==1)|(pred==2))) | ((y==-1) & ((pred==1)|(pred==2)))  |((y==1) & (pred==2)) | ((y==2) & (pred==1)) )  # mis postive 
         fn = np.count_nonzero(((y==1) & ((pred==0)|(pred==-1)|(pred==2))) | ((y==2) & ((pred==0)|(pred==-1)|(pred==1))))  #|((y==0) & (pred==-1)) | ((y==-1) & (pred==0)) ) # mis negative
-        tolor = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0)))
+        toler = np.count_nonzero(((y==0) & (pred==-1)) | ((y==-1) & (pred==0))) # miss negative is useless
         if (fp+tn)==0:
             fa = 0
         else:
@@ -436,20 +407,44 @@ class Analysis:
             dr = 0
         else:
             dr = tp/(tp+fn)
-        acc = (tp+tn+tolar)/(tp+tn+fp+fn+tolar)
+        acc = (tp+tn)/(tp+tn+fp+fn)
         print('accuracy = ', acc)
         print("false alarm: ", fa)
         print("detection rate: ", dr)
-        if(len(self.save_path)>0):
-            file = open(r'C:\Users\x\Desktop\final_data/analysis.csv',mode='a', newline='')
-            writer = csv.writer(file)
-            save_path = self.save_path
-            if(save_path[-1]=='/'or save_path[-1]=='\\'):
-                save_path = save_path[:-1]
-            save_path = save_path.split('/')[-1]
-            save_path = save_path.split('\\')[-1]
-            writer.writerow([save_path,acc,fa,dr])
-            file.close()
+        return [acc,fa,dr]
+
+    def analysis2(self, x, y):
+        '''
+        seperate detection rate of pain/sng
+        '''
+        pred = self.model.predict(x)
+        tn = np.count_nonzero(((y==0) & (pred==0)) | ((y==-1) & (pred==-1)))
+        fn_p = np.count_nonzero((y==1) & ((pred==0)|(pred==-1)|(pred==2)))
+        tp_p = np.count_nonzero((y==1) & (pred==1))
+        # fp_p = np.count_nonzero(((y==0) & (pred==1)) | ((y==-1) & (pred==1)) | ((y==2) & (pred==1)) )
+        fn_s = np.count_nonzero((y==2) & ((pred==0)|(pred==-1)|(pred==1)))
+        tp_s = np.count_nonzero((y==2) & (pred==2))
+        # fp_s = np.count_nonzero(((y==0) & (pred==2)) | ((y==-1) & (pred==2)) | ((y==1) & (pred==2)) )
+        if (tp_p+fn_p)==0:
+            dr_p = 0
+        else:
+            dr_p = tp_p/(tp_p+fn_p)
+        if (tp_s+fn_s)==0:
+            dr_s = 0
+        else:
+            dr_s = tp_s/(tp_s+fn_s)
+        return [dr_p, dr_s]
+
+    def feat_importance(self, x, y, save_path=None):
+        r = permutation_importance(self.model, x, y, n_repeats=10, random_state=0)
+        feature_names = np.arange(len(x[0]))
+        features = np.array(feature_names)
+        # sorted_idx = r.importances_mean.argsort()
+        plt.barh(features, r.importances_mean)
+        plt.xlabel("Permutation Importance")
+        if save_path:
+            plt.savefig(save_path)
+        return r.importances_mean
 
 
 class LSTM_model:
@@ -473,7 +468,7 @@ class LSTM_model:
         if self.classes == 4:
             self.classes_ = self.classes_-1
         callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
-        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16)#,callbacks=callbacks)
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16) #,callbacks=callbacks)
         return self
 
     def predict(self, x):
@@ -487,9 +482,9 @@ class DNN_model:
         self.build_model()
     def build_model(self):
         self.model = tf.keras.models.Sequential()
-        self.model.add(tf.keras.layers.Dense(32))
+        self.model.add(tf.keras.layers.Dense(32),activation='relu')
         self.model.add(tf.keras.layers.Dropout(0.2))
-        self.model.add(tf.keras.layers.Dense(32))
+        self.model.add(tf.keras.layers.Dense(32),activation='relu')
         self.model.add(tf.keras.layers.Dropout(0.2))
         self.model.add(tf.keras.layers.BatchNormalization())
         self.model.add(tf.keras.layers.Dense(self.classes, activation='softmax'))
@@ -503,7 +498,7 @@ class DNN_model:
         if self.classes == 4:
             self.classes_ = self.classes_-1
         callbacks = [tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=20, mode='max')]
-        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16)#,callbacks=callbacks)
+        self.model.fit(x, tf.one_hot(y,self.classes), epochs=200, batch_size=16) #,callbacks=callbacks)
         return self
 
     def predict(self, x):
