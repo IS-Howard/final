@@ -41,7 +41,7 @@ impact of overfitting and non-reliable labels.
 
 ### Experiment structure
 
-![image](./cm/flowchart.png)
+![image](./cm/flowchart.png) 
 
 * Integrated different feature extraction methods
 * Embedded clustering step
